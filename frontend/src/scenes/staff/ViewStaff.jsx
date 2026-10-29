@@ -80,7 +80,7 @@ const ViewStaff = () => {
         <Header title="Staff details" subtitle={[staffDetails.firstName, staffDetails.lastName].filter(Boolean).join(" ")} />
         <Link to={`/staff/viewstaff/${id}/jobs`} style={{ textDecoration: "none" }}>
           <Button variant="contained">
-            View Staff Jobs
+            Payroll & Job History
           </Button>
         </Link>
       </Box>

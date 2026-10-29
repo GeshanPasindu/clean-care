@@ -261,71 +261,6 @@ import { useAuth } from "../../auth/AuthContext";
       fetchJobs();
     }
 
-    const handleSignInSignOut = async (id, isSignedIn) => {
-      try {
-        let response;
-        if (!isSignedIn) {
-          response = await axios.put(environment.apiUrl + `/job/signInJob/${id}`, {});
-        } else {
-          response = await axios.put(environment.apiUrl + `/job/signOffJob/${id}`);
-        }
-
-        if (response.data.success) {
-          await fetchJobs();
-          const updatedJob = response.data.job;
-          setData((prevData) =>
-            prevData.map((item) =>
-              item.id === id ? { ...item, ...updatedJob } : item
-            )
-          );
-          Swal.fire("Updated!", `Job has been ${!isSignedIn ? 'signed in' : 'signed out'}.`, "success");
-        } else {
-          throw new Error(response.data.message);
-        }
-      } catch (error) {
-        console.error(`Error ${!isSignedIn ? 'signing in' : 'signing out'} job:`, error);
-        Swal.fire("Error!", `Failed to ${!isSignedIn ? 'sign in' : 'sign out'} job. Please try again later.`, "error");
-      }
-    };
-
-    const createSignInOutColumn = () => {
-      if (userRole === 'staff') {
-        return {
-          field: "signInSignOutButton",
-          headerName: "Sign In/Sign Out",
-          flex: 0.6,
-          renderCell: (params) => {
-            const assignment = params.row.currentStaffAssignment || {};
-            const isSignedIn = !!assignment.isSignIn && !assignment.isSignOff;
-            const isSignedOut = !!assignment.isSignOff && params.row.jobStatus !== "InProgress";
-            return (
-              <Button
-                variant="contained"
-                color={isSignedIn ? "secondary" : "primary"}
-                disabled={isSignedOut}
-                onClick={() => handleSignInSignOut(params.row.id, isSignedIn)}
-              >
-                {isSignedOut ? "Signed Out" : isSignedIn ? "Sign Out" : "Sign In"}
-              </Button>
-            );
-          },
-        };
-      } else {
-        return {
-          field: "signInSignOutStatus",
-          headerName: "Sign In/Out Status",
-          flex: 0.5,
-          renderCell: (params) => {
-            const isSignedIn = !!params.row.isSignIn && !params.row.isSignOff;
-            const isSignedOut = !!params.row.isSignOff;
-            return isSignedOut ? "Signed Out" : isSignedIn ? "Signed In" : "-";
-          },
-        };
-      }
-    };
-
-    
-    
   let columns =[]
      columns = [
       { field: "jobName", headerName: "Job Name", flex: 0.5 },
@@ -382,7 +317,6 @@ import { useAuth } from "../../auth/AuthContext";
           </Select>
         ),
       },
-      createSignInOutColumn(),
       {
         field: "Actions",
         headerName: "Actions",

@@ -40,6 +40,7 @@ const staffSchema = yup.object().shape({
   bankName: yup.string(),
   bankAcBranch: yup.string(),
   notes: yup.string(),
+  payFrequency: yup.string().oneOf(["Weekly", "Monthly"]).required("Choose a pay frequency"),
   supervisorId: yup.string(),
 });
 
@@ -66,6 +67,7 @@ const EditStaff = () => {
     bankName: "",
     bankAcBranch: "",
     notes: "",
+    payFrequency: "Weekly",
     workStatus: "",
     userName: "",
     supervisorId: "",
@@ -107,6 +109,7 @@ const EditStaff = () => {
       const responseData = response.data;
       if (responseData.success) {
         const staff = responseData.staff;
+        staff.payFrequency = staff.payFrequency || "Weekly";
         staff.supervisorId = staff.supervisorId || (typeof staff.adminId === "object" ? staff.adminId?._id : staff.adminId) || "";
 
         // Convert date fields to 'YYYY-MM-DD' format if they exist
@@ -211,9 +214,24 @@ const EditStaff = () => {
                   field !== 'createdAt' && field !== '__v' && field !== '_id' && field !== 'updatedAt' && field !== 'adminId' && field !== 'user' && field !== 'workStatus' && field !== 'supervisorId' && field !== 'supervisorName' && (
                     <Grid item xs={12} key={field}>
                       <Typography variant="h5" component="span" fontWeight="bold">
-                        {`${field.charAt(0).toUpperCase() + field.slice(1)}:`}
+                        {`${field === "payFrequency" ? "Pay Frequency" : field.charAt(0).toUpperCase() + field.slice(1)}:`}
                       </Typography>
-                      <Field
+                      {field === "payFrequency" ? (
+                        <FormControl fullWidth variant="filled" margin="normal" error={touched.payFrequency && Boolean(errors.payFrequency)}>
+                          <InputLabel id="edit-staff-pay-frequency-label">Pay Frequency</InputLabel>
+                          <Select
+                            labelId="edit-staff-pay-frequency-label"
+                            name="payFrequency"
+                            value={values.payFrequency || "Weekly"}
+                            onChange={(event) => setFieldValue("payFrequency", event.target.value)}
+                            onBlur={handleBlur}
+                          >
+                            <MenuItem value="Weekly">Weekly (Monday–Sunday)</MenuItem>
+                            <MenuItem value="Monthly">Monthly (calendar month)</MenuItem>
+                          </Select>
+                          <FormHelperText>{touched.payFrequency && errors.payFrequency}</FormHelperText>
+                        </FormControl>
+                      ) : <Field
                         as={TextField}
                         fullWidth
                         variant="filled"
@@ -228,7 +246,7 @@ const EditStaff = () => {
                         error={touched[field] && Boolean(errors[field])}
                         helperText={touched[field] && errors[field]}
                         InputLabelProps={{ shrink: true }}
-                      />
+                      />}
                     </Grid>
                   )
                 ))}

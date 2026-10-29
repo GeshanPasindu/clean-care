@@ -16,7 +16,7 @@ const hashPassword = (password) => argon2.hash(password, {
 const safeUserFields = "_id userName email role status adminDetails staffDetails superAdminDetails createdAt updatedAt";
 const staffFields = [
   "firstName", "lastName", "address", "phoneNumber", "position", "dateOfBirth", "dateOfHire",
-  "empContactName", "empPhoneNumber", "bankAcNo", "bankName", "bankAcBranch", "notes", "workStatus",
+  "empContactName", "empPhoneNumber", "bankAcNo", "bankName", "bankAcBranch", "notes", "workStatus", "payFrequency",
 ];
 const validId = (id) => validator.isMongoId(String(id || ""));
 

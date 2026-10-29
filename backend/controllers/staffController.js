@@ -2,11 +2,12 @@ import Staff from "../models/staffModel.js";
 import User from "../models/userModel.js";
 import RefreshSession from "../models/refreshSessionModel.js";
 import RefreshToken from "../models/refreshTokenModel.js";
+import StaffPayroll from "../models/staffPayrollModel.js";
 import { adminScope } from "../middleware/authorization.js";
 
 const editableFields = [
   "firstName", "lastName", "address", "phoneNumber", "position", "dateOfBirth", "dateOfHire",
-  "empContactName", "empPhoneNumber", "bankAcNo", "bankName", "bankAcBranch", "notes",
+  "empContactName", "empPhoneNumber", "bankAcNo", "bankName", "bankAcBranch", "notes", "payFrequency",
 ];
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const parsePage = (value, fallback, max) => {
@@ -61,7 +62,13 @@ export const updateStaffById = async (req, res) => {
 
 export const deleteStaffById = async (req, res) => {
   try {
-    const staff = await Staff.findOneAndDelete({ _id: req.params.id, ...(await adminScope(req)) });
+    const scope = await adminScope(req);
+    const existingStaff = await Staff.findOne({ _id: req.params.id, ...scope }).select("_id user");
+    if (!existingStaff) return res.status(404).json({ message: "Staff not found" });
+    if (await StaffPayroll.exists({ staff: existingStaff._id })) {
+      return res.status(409).json({ message: "Staff with payroll receipts cannot be deleted. Mark the staff member inactive instead." });
+    }
+    const staff = await Staff.findOneAndDelete({ _id: existingStaff._id, ...scope });
     if (!staff) return res.status(404).json({ message: "Staff not found" });
     if (staff.user) {
       await revokeUserSessions(staff.user);

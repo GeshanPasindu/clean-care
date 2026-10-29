@@ -1,4 +1,6 @@
 import { getAccessToken } from "../../auth/apiClient";
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
+import PaymentsIcon from "@mui/icons-material/Payments";
 import {
     Delete as DeleteIcon,
     Visibility as VisibilityIcon,
@@ -145,6 +147,11 @@ import {
     };
   
     const handleEditClick = (id) => {};
+
+    const getTimesheetsUrl = (staff) => {
+      const params = new URLSearchParams({ staffId: staff.id });
+      return `/timesheets?${params.toString()}`;
+    };
   
     const columns = [
       {
@@ -155,6 +162,7 @@ import {
       },
       { field: "supervisorName", headerName: "Supervisor", flex: 1 },
       { field: "position", headerName: "Position", flex: 1 },
+      { field: "payFrequency", headerName: "Pay Frequency", flex: 0.8, valueGetter: (params) => params.row.payFrequency || "Weekly" },
       { field: "phoneNumber", headerName: "Phone Number", flex: 1 },
       {
         field: "workStatus",
@@ -173,7 +181,8 @@ import {
       {
         field: "Actions",
         headerName: "Actions",
-        flex: 0.6,
+        flex: 0.9,
+        minWidth: 220,
         renderCell: (params) => (
           <Box>
             <Tooltip title="Edit">
@@ -187,6 +196,20 @@ import {
               <Link to={`/staff/viewStaff/${params.row.id}`}>
                 <IconButton>
                   <VisibilityIcon />
+                </IconButton>
+              </Link>
+            </Tooltip>
+            <Tooltip title="Timesheets">
+              <Link to={getTimesheetsUrl(params.row)}>
+                <IconButton aria-label={`View timesheets for ${params.row.firstName} ${params.row.lastName}`}>
+                  <AccessTimeIcon />
+                </IconButton>
+              </Link>
+            </Tooltip>
+            <Tooltip title="Payroll and payout receipts">
+              <Link to={`/staff/viewstaff/${params.row.id}/jobs`}>
+                <IconButton aria-label={`View payroll for ${params.row.firstName} ${params.row.lastName}`}>
+                  <PaymentsIcon />
                 </IconButton>
               </Link>
             </Tooltip>

@@ -4,10 +4,35 @@ const Schema = mongoose.Schema;
 const staffTimeEntrySchema = new Schema({
     signInTime: Date,
     signOffTime: Date,
+    description: {
+        type: String,
+        trim: true,
+        maxlength: 1000,
+        default: "",
+    },
     hours: {
         type: Number,
         default: 0,
         min: 0,
+    },
+    hourRate: {
+        type: Number,
+        min: 0,
+    },
+    payoutAmount: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    payoutReceiptCredit: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    payoutBatchId: {
+        type: Schema.Types.ObjectId,
+        ref: 'StaffPayroll',
+        default: null,
     },
 }, { _id: false });
 
@@ -52,6 +77,23 @@ const staffAssignmentSchema = new Schema({
         default: 'Pending',
         required: true,
     },
+    payoutReceipts: {
+        type: [{
+            amount: { type: Number, required: true, min: 0.01 },
+            paymentDate: { type: Date, required: true },
+            method: { type: String, enum: ['Cash', 'Bank Transfer', 'Card', 'Cheque', 'Other'], required: true },
+            referenceNumber: { type: String, trim: true, maxlength: 120, default: '' },
+            recordedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+            payeeName: { type: String, trim: true, maxlength: 160, default: '' },
+            payeeEmail: { type: String, trim: true, maxlength: 254, default: '' },
+            payeePhoneNumber: { type: String, trim: true, maxlength: 40, default: '' },
+            jobName: { type: String, trim: true, maxlength: 160, default: '' },
+            jobDate: { type: Date },
+            hours: { type: Number, min: 0, default: 0 },
+            hourRate: { type: Number, min: 0, default: 0 },
+        }],
+        default: [],
+    },
     signInTime: Date,
     signOffTime: Date,
     timeEntries: {
@@ -67,6 +109,23 @@ const staffAssignmentSchema = new Schema({
         default: false,
     },
 }, { _id: false });
+
+const receivedPaymentSchema = new Schema({
+    amount: { type: Number, required: true, min: 0.01 },
+    paymentDate: { type: Date, required: true },
+    method: {
+        type: String,
+        enum: ['Cash', 'Bank Transfer', 'Card', 'Cheque', 'Other'],
+        required: true,
+    },
+    referenceNumber: { type: String, trim: true, maxlength: 120, default: '' },
+    recordedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    clientName: { type: String, trim: true, maxlength: 160, default: '' },
+    clientEmail: { type: String, trim: true, maxlength: 254, default: '' },
+    clientPhoneNumber: { type: String, trim: true, maxlength: 40, default: '' },
+    clientAddress: { type: String, trim: true, maxlength: 500, default: '' },
+    jobName: { type: String, trim: true, maxlength: 160, default: '' },
+}, { timestamps: true });
 
 const jobSchema = new Schema(
     {
@@ -97,6 +156,10 @@ const jobSchema = new Schema(
         },
         staffAssignments: {
             type: [staffAssignmentSchema],
+            default: [],
+        },
+        receivedPayments: {
+            type: [receivedPaymentSchema],
             default: [],
         },
         orgNoOfhours: {

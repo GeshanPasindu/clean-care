@@ -1,72 +1,79 @@
 import { getAccessToken } from "../../auth/apiClient";
-import React, { useEffect, useState } from 'react';
-import { Box } from '@mui/material';
-import { useParams } from 'react-router-dom';
-import axios from 'axios';
-import Header from '../../components/Header';
-import { environment } from '../../environment';
-import DetailGrid from '../../components/DetailGrid';
-import { pageContainerSx } from '../../styles/uiStyles';
+import React, { useEffect, useState } from "react";
+import { Box, Button, Typography } from "@mui/material";
+import PrintIcon from "@mui/icons-material/Print";
+import { useParams } from "react-router-dom";
+import axios from "axios";
+import Header from "../../components/Header";
+import { environment } from "../../environment";
+import { pageContainerSx } from "../../styles/uiStyles";
+import InvoicePreview from "./InvoicePreview";
 
 const ViewInvoice = () => {
   const { id } = useParams();
-  const [invoiceDetails, setInvoiceDetails] = useState({
-    invoiceTitle: "",
-    invoiceDescription: "",
-    sendDate: "",
-    client: {
-      firstName: "",
-      lastName: "",
-      email: "",
-    },
-    amount: "",
-    invoiceStatus: "",
-  });
+  const [invoice, setInvoice] = useState(null);
+  const [loadError, setLoadError] = useState(false);
   const token = getAccessToken();
 
   useEffect(() => {
-    fetchInvoiceDetails();
-  }, [id]);
-
-  const fetchInvoiceDetails = async () => {
-    try {
-
-       
-      const response = await axios.get(environment.apiUrl + `/invoice/getInvoiceById/${id}`,{
-        headers: {
-            Authorization: `Bearer ${token}`
-          }
-      });
-      const responseData = response.data;
-      if (responseData.success) {
-        const { invoice } = responseData;
-        const { invoiceTitle, invoiceDescription, sendDate, client, amount, invoiceStatus } = invoice;
-        const formattedClient = {
-          firstName: client.firstName,
-          lastName: client.lastName,
-          email: client.email,
-        };
-        setInvoiceDetails({
-          invoiceTitle,
-          invoiceDescription,
-          sendDate,
-          client: formattedClient,
-          amount,
-          invoiceStatus,
+    let isCurrent = true;
+    const fetchInvoiceDetails = async () => {
+      try {
+        const response = await axios.get(`${environment.apiUrl}/invoice/getInvoiceById/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-      } else {
-        console.error('Failed to fetch invoice details:', responseData.message);
+        if (isCurrent && response.data.success) setInvoice(response.data.invoice);
+        else if (isCurrent) setLoadError(true);
+      } catch (error) {
+        console.error("Error fetching invoice details:", error);
+        if (isCurrent) setLoadError(true);
       }
-    } catch (error) {
-      console.error('Error fetching invoice details:', error);
-    }
-  };
+    };
+
+    fetchInvoiceDetails();
+    return () => { isCurrent = false; };
+  }, [id, token]);
 
   return (
-    <Box sx={{ ...pageContainerSx, maxWidth: 1000, mx: "auto" }}>
-      <Header title="Invoice details" subtitle={`Invoice ID: ${id}`} />
-      <DetailGrid data={invoiceDetails} />
-    </Box>
+    <>
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 14mm; }
+          body * { visibility: hidden !important; }
+          .invoice-print-area, .invoice-print-area * { visibility: visible !important; }
+          .invoice-print-area {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            box-shadow: none !important;
+          }
+        }
+      `}</style>
+      <Box sx={{ ...pageContainerSx, maxWidth: 1000, mx: "auto" }}>
+        <Box className="no-print" sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, mb: 2.5 }}>
+          <Header title="Invoice" subtitle="Printable invoice details" />
+          <Button
+            variant="contained"
+            startIcon={<PrintIcon />}
+            onClick={() => window.print()}
+            disabled={!invoice}
+            sx={{ whiteSpace: "nowrap" }}
+          >
+            Print invoice
+          </Button>
+        </Box>
+        {invoice ? (
+          <InvoicePreview invoice={invoice} client={invoice.client} invoiceNumber={invoice._id} />
+        ) : (
+          <Typography color={loadError ? "error" : "text.secondary"}>
+            {loadError ? "Unable to load this invoice." : "Loading invoice..."}
+          </Typography>
+        )}
+      </Box>
+    </>
   );
 };
 

@@ -7,6 +7,7 @@ import Topbar from "./scenes/global/Topbar";
 import Login from "./scenes/login";
 
 import Jobs from "./scenes/jobs"
+import Timesheets from "./scenes/timesheets";
 import AddJob from "./scenes/jobs/AddJob.jsx";
 import ViewJob from "./scenes/jobs/ViewJob.jsx"
 import EditJob from "./scenes/jobs/EditJob.jsx";
@@ -79,6 +80,14 @@ return (
                 element={
                   <PrivateRoute allowedRoles={['superAdmin', 'admin', 'staff']}>
                     <Jobs />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/timesheets"
+                element={
+                  <PrivateRoute allowedRoles={['superAdmin', 'admin', 'staff']}>
+                    <Timesheets />
                   </PrivateRoute>
                 }
               />
@@ -200,6 +209,14 @@ return (
                 path="/staff/viewstaff/:id/jobs"
                 element={
                   <PrivateRoute allowedRoles={['superAdmin', 'admin']}>
+                    <StaffJobs />
+                  </PrivateRoute>
+                }
+              />
+              <Route
+                path="/my-payments"
+                element={
+                  <PrivateRoute allowedRoles={['staff']}>
                     <StaffJobs />
                   </PrivateRoute>
                 }

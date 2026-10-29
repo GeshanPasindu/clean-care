@@ -1,4 +1,5 @@
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
 import BusinessCenterOutlinedIcon from "@mui/icons-material/BusinessCenterOutlined";
 import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded";
 import ContactsOutlinedIcon from "@mui/icons-material/ContactsOutlined";
@@ -192,6 +193,22 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
                 onNavigate={handleNavigate}
               />
             </>
+          )}
+          <NavItem
+            title="Timesheets"
+            to="/timesheets"
+            icon={<AccessTimeOutlinedIcon />}
+            isActive={matches("/timesheets", true)}
+            onNavigate={handleNavigate}
+          />
+          {userRole === "staff" && (
+            <NavItem
+              title="My Payments"
+              to="/my-payments"
+              icon={<PaymentsOutlinedIcon />}
+              isActive={matches("/my-payments")}
+              onNavigate={handleNavigate}
+            />
           )}
           {showSuperAdmin && (
             <NavItem

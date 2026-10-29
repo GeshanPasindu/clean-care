@@ -357,6 +357,25 @@ import {
                   />
                 </Box>
                 <Typography fontWeight="bold" fontSize="16px">
+                  Pay Frequency*
+                </Typography>
+                <Box mt={-2}>
+                  <FormControl fullWidth variant="filled" error={!!touched.payFrequency && !!errors.payFrequency}>
+                    <InputLabel id="staff-pay-frequency-label">Pay Frequency</InputLabel>
+                    <Select
+                      labelId="staff-pay-frequency-label"
+                      name="payFrequency"
+                      value={values.payFrequency}
+                      onBlur={handleBlur}
+                      onChange={(event) => setFieldValue("payFrequency", event.target.value)}
+                    >
+                      <MenuItem value="Weekly">Weekly (Monday–Sunday)</MenuItem>
+                      <MenuItem value="Monthly">Monthly (calendar month)</MenuItem>
+                    </Select>
+                    <FormHelperText>{touched.payFrequency && errors.payFrequency}</FormHelperText>
+                  </FormControl>
+                </Box>
+                <Typography fontWeight="bold" fontSize="16px">
                   Emergency Contact Name
                 </Typography>
                 <Box mt={-2}>
@@ -501,6 +520,7 @@ import {
     bankName: yup.string(),
     bankAcBranch: yup.string(),
     notes: yup.string(),
+    payFrequency: yup.string().oneOf(["Weekly", "Monthly"]).required("Choose a pay frequency"),
     supervisorId: yup.string(),
   });
   
@@ -522,6 +542,7 @@ import {
     bankName: "",
     bankAcBranch: "",
     notes: "",
+    payFrequency: "Weekly",
     supervisorId: "",
   };
   

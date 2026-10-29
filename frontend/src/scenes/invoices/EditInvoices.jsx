@@ -26,6 +26,7 @@ const invoiceSchema = yup.object().shape({
   client: yup.string().required("Client is required"),
   amount: yup.number().required("Amount is required").nullable(),
   sendDate: yup.date().required("Send Date is required").nullable(),
+  notes: yup.string().max(2000, "Notes must be 2000 characters or fewer"),
 });
 
 const EditInvoice = () => {
@@ -37,7 +38,8 @@ const EditInvoice = () => {
     invoiceDescription: "",
     sendDate: "",
     client: "",
-    amount: ""
+    amount: "",
+    notes: "",
   });
 
   const [clients, setClients] = useState([]);
@@ -91,7 +93,7 @@ const EditInvoice = () => {
           invoice.sendDate = new Date(invoice.sendDate).toISOString().split('T')[0];
         }
         // Ensure client is set as client ID
-        setInvoiceDetails({ ...invoice, client: invoice.client._id });
+        setInvoiceDetails({ ...invoice, client: invoice.client._id, notes: invoice.notes || "" });
       } else {
         console.error('Failed to fetch invoice details:', responseData.message);
       }

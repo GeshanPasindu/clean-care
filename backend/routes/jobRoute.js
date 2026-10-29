@@ -1,6 +1,8 @@
 import express from "express";
 import {
-  addJob, updatedJob, getTotalAndProfit, getAllJobsCount, paymentJob, getStaffJobsbyId,
+  addJob, updatedJob, getTotalAndProfit, getAllJobsCount, recordClientPayment, getStaffJobsbyId,
+  getTimesheets,
+  getStaffPayroll, recordStaffPayroll,
   getFilteredJobs, getInvoice, getJobsByStaffId, signInJob, signOffJob,
   getAllCompletedJobs, deleteJobById, getJobById, getAllJobs, getAllJobPagination, updateStatus,
 } from "../controllers/jobController.js";
@@ -26,10 +28,13 @@ router.get("/getAllCompletedJobs", requireRoles("superAdmin", "admin"), asyncHan
 router.patch("/updateStatus/:id", requireRoles("superAdmin", "admin"), requireOwnedRecord(Job), asyncHandler(updateStatus));
 router.put("/signInJob/:jobId", requireRoles("superAdmin", "admin", "staff"), requireOwnedRecord(Job, { param: "jobId", ownerType: "job" }), asyncHandler(signInJob));
 router.put("/signOffJob/:jobId", requireRoles("superAdmin", "admin", "staff"), requireOwnedRecord(Job, { param: "jobId", ownerType: "job" }), asyncHandler(signOffJob));
+router.get("/timesheets", requireRoles("superAdmin", "admin", "staff"), asyncHandler(getTimesheets));
 router.get("/getInvoice/:jobId", requireRoles("superAdmin", "admin"), requireOwnedRecord(Job, { param: "jobId" }), asyncHandler(getInvoice));
 router.get("/getJobsbyStaff/:staffId", requireRoles("superAdmin", "admin", "staff"), asyncHandler(getJobsByStaffId));
 router.get("/getFilteredJobs/:clientId", requireRoles("superAdmin", "admin"), requireOwnedRecord(Client, { param: "clientId" }), asyncHandler(getFilteredJobs));
 router.get("/getStaffJobsbyId/:assignedStaff", requireRoles("superAdmin", "admin"), requireOwnedRecord(Staff, { param: "assignedStaff" }), asyncHandler(getStaffJobsbyId));
-router.put("/paymentJob", requireRoles("superAdmin", "admin"), asyncHandler(paymentJob));
+router.get("/staffPayroll/:staffId", requireRoles("superAdmin", "admin", "staff"), asyncHandler(getStaffPayroll));
+router.post("/staffPayroll/:staffId", requireRoles("superAdmin", "admin"), asyncHandler(recordStaffPayroll));
+router.post("/:jobId/receivedPayments", requireRoles("superAdmin", "admin"), requireOwnedRecord(Job, { param: "jobId" }), asyncHandler(recordClientPayment));
 
 export default router;

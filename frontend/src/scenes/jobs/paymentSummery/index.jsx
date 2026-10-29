@@ -4,6 +4,7 @@ import {
     Visibility as VisibilityIcon,
   } from "@mui/icons-material";
   import EditIcon from "@mui/icons-material/Edit";
+  import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
   import {
     Box,
     Button,
@@ -25,6 +26,7 @@ import {
 import { useAuth } from "../../../auth/AuthContext";
   import { environment } from "../../../environment.js";
   import { filterBarSx, pageContainerSx, pageHeaderRowSx, surfaceSx, tableSurfaceSx } from "../../../styles/uiStyles";
+  import PaymentReceiptDialog from "./PaymentReceiptDialog";
 
 
   const Jobs = () => {
@@ -41,7 +43,9 @@ import { useAuth } from "../../../auth/AuthContext";
 
     const [totalPayment, setTotalPayment] = useState(0);
     const [staffPayment, setStaffPayment] = useState(0);
+    const [receivedPayment, setReceivedPayment] = useState(0);
     const [profit, setProfit] = useState(0);
+    const [selectedJob, setSelectedJob] = useState(null);
     
     
   
@@ -140,12 +144,23 @@ import { useAuth } from "../../../auth/AuthContext";
 
     const calculateSummary = (jobs) => {
         const totalPayment = jobs.reduce((acc, job) => acc + (job.orgTotal || 0), 0);
+        const receivedPayment = jobs.reduce((acc, job) => acc + (job.receivedPayments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0), 0);
         const staffPayment = jobs.reduce((acc, job) => acc + (job.staffPayTotal || 0), 0);
         const profit = totalPayment - staffPayment;
         setTotalPayment(totalPayment);
+        setReceivedPayment(receivedPayment);
         setStaffPayment(staffPayment);
         setProfit(profit);
       };
+
+    const handlePaymentSaved = (updatedJob) => {
+      setSelectedJob(updatedJob);
+      const updatedRows = data.map((row) => row.id === String(updatedJob._id)
+        ? { ...row, receivedPayments: updatedJob.receivedPayments }
+        : row);
+      setData(updatedRows);
+      calculateSummary(updatedRows);
+    };
     const fetchStaffAndClients = async () => {
       try {
         const headers = {
@@ -334,6 +349,34 @@ import { useAuth } from "../../../auth/AuthContext";
     if (shouldShowButton) {
       columns.splice(6, 0, { field: "orgNoOfhours", headerName: "Original No Hours", flex: 0.5 });
       columns.splice(7, 0, { field: "orgTotal", headerName: "Total Payment", flex: 0.5 });
+      columns.push(
+        {
+          field: "receivedAmount",
+          headerName: "Received",
+          flex: 0.6,
+          valueGetter: (params) => (params.row.receivedPayments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+          valueFormatter: (params) => `LKR ${Number(params.value || 0).toFixed(2)}`,
+        },
+        {
+          field: "balanceDue",
+          headerName: "Balance Due",
+          flex: 0.6,
+          valueGetter: (params) => Math.max(0, Number(params.row.orgTotal || params.row.payment || 0) - (params.row.receivedPayments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0)),
+          valueFormatter: (params) => `LKR ${Number(params.value || 0).toFixed(2)}`,
+        },
+        {
+          field: "receipts",
+          headerName: "Receipts",
+          flex: 0.7,
+          sortable: false,
+          filterable: false,
+          renderCell: (params) => (
+            <Button size="small" startIcon={<ReceiptLongOutlinedIcon />} onClick={() => setSelectedJob(params.row)}>
+              Receipts
+            </Button>
+          ),
+        }
+      );
     }
     if (userStaff) {
       columns.splice(5, 0, { field: "staffPayTotal", headerName: "Staff Payment", flex: 0.5 });
@@ -343,7 +386,7 @@ import { useAuth } from "../../../auth/AuthContext";
     return (
       <Box sx={pageContainerSx}>
         <Box sx={pageHeaderRowSx}>
-          <Header title="Payment Summary" subtitle="Review job revenue, staff payments, and profit" />
+          <Header title="Payment Summary" subtitle="Review job revenue, receipts, staff payments, and profit" />
           
         </Box>
         {/* <Box
@@ -456,18 +499,22 @@ import { useAuth } from "../../../auth/AuthContext";
   </Button> */}
 </Box>
 
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" }, gap: 2, mb: 2 }}>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, 1fr)", xl: "repeat(4, 1fr)" }, gap: 2, mb: 2 }}>
           <Box sx={{ ...surfaceSx, p: 2 }}>
-            <Typography color="text.secondary" sx={{ fontSize: "0.8rem", mb: 0.5 }}>Total payment</Typography>
-            <Typography variant="h3">${totalPayment}</Typography>
+            <Typography color="text.secondary" sx={{ fontSize: "0.8rem", mb: 0.5 }}>Total billed</Typography>
+            <Typography variant="h3">LKR {totalPayment.toFixed(2)}</Typography>
+          </Box>
+          <Box sx={{ ...surfaceSx, p: 2 }}>
+            <Typography color="text.secondary" sx={{ fontSize: "0.8rem", mb: 0.5 }}>Total received</Typography>
+            <Typography variant="h3">LKR {receivedPayment.toFixed(2)}</Typography>
           </Box>
           <Box sx={{ ...surfaceSx, p: 2 }}>
             <Typography color="text.secondary" sx={{ fontSize: "0.8rem", mb: 0.5 }}>Staff payment</Typography>
-            <Typography variant="h3">${staffPayment}</Typography>
+            <Typography variant="h3">LKR {staffPayment.toFixed(2)}</Typography>
           </Box>
           <Box sx={{ ...surfaceSx, p: 2 }}>
             <Typography color="text.secondary" sx={{ fontSize: "0.8rem", mb: 0.5 }}>Profit</Typography>
-            <Typography variant="h3">${profit}</Typography>
+            <Typography variant="h3">LKR {profit.toFixed(2)}</Typography>
           </Box>
         </Box>
         <Box sx={tableSurfaceSx}>
@@ -477,6 +524,12 @@ import { useAuth } from "../../../auth/AuthContext";
             components={{ Toolbar: GridToolbar }}
           />
         </Box>
+        <PaymentReceiptDialog
+          open={Boolean(selectedJob)}
+          job={selectedJob}
+          onClose={() => setSelectedJob(null)}
+          onPaymentSaved={handlePaymentSaved}
+        />
       </Box>
     );
   };

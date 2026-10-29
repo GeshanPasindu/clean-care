@@ -25,6 +25,12 @@ const invoiceSchema = new Schema(
             type: Number,
             required: false,
         },
+        notes: {
+            type: String,
+            trim: true,
+            maxlength: 2000,
+            required: false,
+        },
         invoiceStatus:{
             type: String,
             enum: ['Pending', 'Done'],

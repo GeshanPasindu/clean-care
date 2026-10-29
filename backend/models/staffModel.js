@@ -29,6 +29,12 @@ const staffSchema = new Schema(
             type: String,
             required: false,
         },
+        payFrequency: {
+            type: String,
+            enum: ['Weekly', 'Monthly'],
+            default: 'Weekly',
+            required: true,
+        },
         dateOfBirth: {
             type: Date,
             required: false,

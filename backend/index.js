@@ -1,5 +1,6 @@
 import "dotenv/config";
 import mongoose from "mongoose";
+import StaffPayroll from "./models/staffPayrollModel.js";
 import express from "express"
 import cors from "cors"
 import cookieParser from "cookie-parser";
@@ -55,6 +56,7 @@ app.use((error, req, res, next) => {
 mongoose.connect(process.env.MONGO_URI)
     .then(async () => {
         await ensureSingleSuperAdminIndex();
+        await StaffPayroll.init();
         app.listen(process.env.PORT, () => {
             console.log("Connected to the database and listening on port", process.env.PORT);
         });

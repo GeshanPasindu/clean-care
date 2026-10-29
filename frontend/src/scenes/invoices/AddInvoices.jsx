@@ -18,7 +18,8 @@ import {
   import axios from "axios";
   import Header from "../../components/Header";
   import { environment } from "../../environment";
-  import { formPageSx } from "../../styles/uiStyles";
+  import { pageContainerSx, surfaceSx } from "../../styles/uiStyles";
+  import InvoicePreview from "./InvoicePreview";
   
   const AddInvoice = () => {
     const isNonMobile = useMediaQuery("(min-width:600px)");
@@ -67,7 +68,7 @@ import {
           resetForm();
         } else {
           setAlertSeverity("error");
-          setAlertMessage(response.data.result.message);
+          setAlertMessage(response.data.message || "Failed to add invoice");
         }
       } catch (error) {
         console.error("Error creating invoice:", error);
@@ -80,7 +81,7 @@ import {
     };
   
     return (
-      <Box sx={formPageSx}>
+      <Box sx={pageContainerSx}>
         <Header title="Add Invoice" subtitle="" />
         <Snackbar
           open={openSnackbar}
@@ -111,122 +112,129 @@ import {
             handleBlur,
             handleChange,
             handleSubmit,
-            setFieldValue,
           }) => (
-            <form onSubmit={handleSubmit}>
-              <Box display="grid" gap="30px" gridTemplateColumns={isNonMobile ? "repeat(1, 1fr)" : "repeat(1, 1fr)"}>
-                <Typography fontWeight="bold" fontSize="16px">Invoice Title*</Typography>
-                <Box mt={-2}>
-                  <TextField
-                    fullWidth
-                    variant="filled"
-                    type="text"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    value={values.invoiceTitle}
-                    name="invoiceTitle"
-                    error={!!touched.invoiceTitle && !!errors.invoiceTitle}
-                    helperText={touched.invoiceTitle && errors.invoiceTitle}
-                  />
-                </Box>
-                <Typography fontWeight="bold" fontSize="16px">Description*</Typography>
-                <Box mt={-2}>
-                  <TextField
-                    fullWidth
-                    variant="filled"
-                    type="text"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    value={values.invoiceDescription}
-                    name="invoiceDescription"
-                    multiline
-                    rows={5}
-                    error={!!touched.invoiceDescription && !!errors.invoiceDescription}
-                    helperText={touched.invoiceDescription && errors.invoiceDescription}
-                  />
-                </Box>
-                <Typography fontWeight="bold" fontSize="16px">Client*</Typography>
-                <Box mt={-2}>
-                  <Select
-                    fullWidth
-                    variant="filled"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    value={values.client}
-                    name="client"
-                    error={!!touched.client && !!errors.client}
-                    helperText={touched.client && errors.client}
+            <form onSubmit={handleSubmit} style={{ marginTop: 20 }}>
+              <Box
+                display="grid"
+                gridTemplateColumns={isNonMobile ? "minmax(0, 1.1fr) minmax(340px, 0.9fr)" : "1fr"}
+                alignItems="start"
+                gap={2.5}
+              >
+                <Box sx={{ ...surfaceSx, p: { xs: 2, sm: 3 } }}>
+                  <Box
+                    display="grid"
+                    gap={1.5}
+                    alignItems="center"
+                    gridTemplateColumns={isNonMobile ? "minmax(125px, 0.35fr) minmax(0, 1fr)" : "1fr"}
                   >
-                    {clients.map((client) => (
-                      <MenuItem key={client._id} value={client._id}>
-                        {client.firstName} {client.lastName}
-                      </MenuItem>
-                    ))}
-                  </Select>
+                    <Typography fontWeight="bold" fontSize="14px">Invoice Title*</Typography>
+                    <TextField
+                      fullWidth
+                      variant="filled"
+                      type="text"
+                      onBlur={handleBlur}
+                      onChange={handleChange}
+                      value={values.invoiceTitle}
+                      name="invoiceTitle"
+                      error={!!touched.invoiceTitle && !!errors.invoiceTitle}
+                      helperText={touched.invoiceTitle && errors.invoiceTitle}
+                    />
+                    <Typography fontWeight="bold" fontSize="14px">Description*</Typography>
+                    <TextField
+                      fullWidth
+                      variant="filled"
+                      type="text"
+                      onBlur={handleBlur}
+                      onChange={handleChange}
+                      value={values.invoiceDescription}
+                      name="invoiceDescription"
+                      multiline
+                      rows={4}
+                      error={!!touched.invoiceDescription && !!errors.invoiceDescription}
+                      helperText={touched.invoiceDescription && errors.invoiceDescription}
+                    />
+                    <Typography fontWeight="bold" fontSize="14px">Client*</Typography>
+                    <Box>
+                      <Select
+                        fullWidth
+                        variant="filled"
+                        onBlur={handleBlur}
+                        onChange={handleChange}
+                        value={values.client}
+                        name="client"
+                        error={!!touched.client && !!errors.client}
+                      >
+                        {clients.map((client) => (
+                          <MenuItem key={client._id} value={client._id}>
+                            {client.firstName} {client.lastName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      {touched.client && errors.client && (
+                        <Typography color="error" variant="caption">{errors.client}</Typography>
+                      )}
+                    </Box>
+                    <Typography fontWeight="bold" fontSize="14px">Amount (LKR)*</Typography>
+                    <TextField
+                      fullWidth
+                      variant="filled"
+                      type="number"
+                      inputProps={{ min: 0, step: "0.01" }}
+                      onBlur={handleBlur}
+                      onChange={handleChange}
+                      value={values.amount}
+                      name="amount"
+                      error={!!touched.amount && !!errors.amount}
+                      helperText={touched.amount && errors.amount}
+                    />
+                    <Typography fontWeight="bold" fontSize="14px">Send Date*</Typography>
+                    <TextField
+                      fullWidth
+                      variant="filled"
+                      type="date"
+                      onBlur={handleBlur}
+                      onChange={handleChange}
+                      value={values.sendDate}
+                      name="sendDate"
+                      error={!!touched.sendDate && !!errors.sendDate}
+                      helperText={touched.sendDate && errors.sendDate}
+                    />
+                    <Typography fontWeight="bold" fontSize="14px">Notes</Typography>
+                    <TextField
+                      fullWidth
+                      variant="filled"
+                      type="text"
+                      onBlur={handleBlur}
+                      onChange={handleChange}
+                      value={values.notes}
+                      name="notes"
+                      multiline
+                      rows={3}
+                      error={!!touched.notes && !!errors.notes}
+                      helperText={touched.notes && errors.notes}
+                    />
+                  </Box>
+                  <Box display="flex" justifyContent="end" mt={2.5}>
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      disabled={loading}
+                      sx={{
+                        backgroundColor: "#6870fa",
+                        color: "white",
+                        fontSize: "16px",
+                        "&:hover": { backgroundColor: "#3e4396" },
+                      }}
+                    >
+                      {loading ? "Adding..." : "Create invoice"}
+                    </Button>
+                  </Box>
                 </Box>
-                <Typography fontWeight="bold" fontSize="16px">Amount*</Typography>
-                <Box mt={-2}>
-                  <TextField
-                    fullWidth
-                    variant="filled"
-                    type="number"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    value={values.amount}
-                    name="amount"
-                    error={!!touched.amount && !!errors.amount}
-                    helperText={touched.amount && errors.amount}
-                  />
-                </Box>
-                <Typography fontWeight="bold" fontSize="16px">Send Date*</Typography>
-                <Box mt={-2}>
-                  <TextField
-                    fullWidth
-                    variant="filled"
-                    type="date"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    value={values.sendDate}
-                    name="sendDate"
-                    error={!!touched.sendDate && !!errors.sendDate}
-                    helperText={touched.sendDate && errors.sendDate}
-                  />
-                </Box>
-                <Typography fontWeight="bold" fontSize="16px">Notes</Typography>
-                <Box mt={-2}>
-                  <TextField
-                    fullWidth
-                    variant="filled"
-                    type="text"
-                    onBlur={handleBlur}
-                    onChange={handleChange}
-                    value={values.notes}
-                    name="notes"
-                    multiline
-                    rows={3}
-                    error={!!touched.notes && !!errors.notes}
-                    helperText={touched.notes && errors.notes}
-                  />
-                </Box>
-              </Box>
-              {/* Submit Button */}
-              <Box display="flex" justifyContent="end" mt="20px">
-                <Button
-                  type="submit"
-                  variant="contained"
-                  disabled={loading}
-                  sx={{
-                    backgroundColor: "#6870fa",
-                    color: "white",
-                    marginRight: 2,
-                    fontSize: "16px",
-                    "&:hover": {
-                      backgroundColor: "#3e4396",
-                    },
-                  }}
-                >
-                  {loading ? "Adding..." : "Add"}
-                </Button>
+                <InvoicePreview
+                  invoice={values}
+                  client={clients.find((client) => client._id === values.client)}
+                  preview
+                />
               </Box>
             </form>
           )}
@@ -241,7 +249,7 @@ import {
     client: yup.string().required("Client is required"),
     amount: yup.number().required("Amount is required").nullable(),
     sendDate: yup.date().required("Send Date is required").nullable(),
-    notes: yup.string(),
+    notes: yup.string().max(2000, "Notes must be 2000 characters or fewer"),
   });
   
   const initialValues = {

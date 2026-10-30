@@ -13,6 +13,7 @@ import {
     MenuItem,
     Typography,
     TextField,
+    Paper,
   } from "@mui/material";
   import { DataGrid, GridToolbar } from "@mui/x-data-grid";
   import jsPDF from "jspdf";
@@ -34,6 +35,9 @@ import { useAuth } from "../../auth/AuthContext";
     const [endDate, setEndDate] = useState("");
     const [staff, setStaff] = useState([]);
     const [clients, setClients] = useState([]);
+    const [activeJob, setActiveJob] = useState(null);
+    const [attendanceUpdating, setAttendanceUpdating] = useState(false);
+    const [currentTime, setCurrentTime] = useState(Date.now());
     const [selectedStaff, setSelectedStaff] = useState("");
     const [selectedClient, setSelectedClient] = useState("");
     const token = getAccessToken();
@@ -53,6 +57,23 @@ import { useAuth } from "../../auth/AuthContext";
       const time = new Date(dateTime);
       return time.toLocaleTimeString("en-CA", { day:'2-digit',month:'2-digit',year:'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',hour12: false, });
     };
+
+    const formatElapsedTime = (startTime, now) => {
+      const start = new Date(startTime).getTime();
+      if (!Number.isFinite(start)) return "00:00:00";
+      const totalSeconds = Math.max(0, Math.floor((now - start) / 1000));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const seconds = totalSeconds % 60;
+      return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+    };
+
+    const activeJobId = activeJob?._id;
+    useEffect(() => {
+      if (!activeJobId) return undefined;
+      const timer = window.setInterval(() => setCurrentTime(Date.now()), 1000);
+      return () => window.clearInterval(timer);
+    }, [activeJobId]);
   
     // const fetchJobs = async () => {
     //   try {
@@ -113,11 +134,26 @@ import { useAuth } from "../../auth/AuthContext";
 
     }
   
-        const response = await axios.get(url,{params});
+        const headers = { Authorization: `Bearer ${token}` };
+        const response = await axios.get(url, { params, headers });
         const responseData = response.data;
         console.log(responseData)
         if (responseData.success) {
           fetchAllRef.current = false;
+          let allStaffJobs = responseData.jobs || [];
+          if (userRole === "staff" && (startDate || endDate)) {
+            try {
+              const allStaffResponse = await axios.get(url, { headers });
+              if (allStaffResponse.data.success) allStaffJobs = allStaffResponse.data.jobs || [];
+            } catch (activeJobError) {
+              console.error("Error refreshing the active staff task:", activeJobError);
+            }
+          }
+          if (userRole === "staff") {
+            setActiveJob(allStaffJobs.find((job) =>
+              job.currentStaffAssignment?.isSignIn && !job.currentStaffAssignment?.isSignOff
+            ) || null);
+          }
           const modifiedData = responseData.jobs.map((item) => ({
             ...item,
             id: item._id,
@@ -214,6 +250,46 @@ import { useAuth } from "../../auth/AuthContext";
       } catch (error) {
         console.error("Error updating job status:", error);
         Swal.fire("Error!", "Failed to update job status. Please try again later.", "error");
+      }
+    };
+
+    const handleAttendanceToggle = async (job) => {
+      const assignment = job?.currentStaffAssignment || {};
+      const isSignedIn = !!assignment.isSignIn && !assignment.isSignOff;
+      const jobId = job?._id || job?.id;
+      if (!jobId) return;
+
+      let body = {};
+      if (isSignedIn) {
+        const result = await Swal.fire({
+          title: "Describe the work completed",
+          input: "textarea",
+          inputPlaceholder: "Add a short description of the work...",
+          inputAttributes: { maxlength: "1000", "aria-label": "Work description" },
+          inputValidator: (value) => !value?.trim() ? "Enter a work description before signing out." : undefined,
+          showCancelButton: true,
+          confirmButtonText: "Save and sign out",
+          cancelButtonText: "Keep working",
+        });
+        if (!result.isConfirmed) return;
+        body = { description: result.value.trim() };
+      }
+
+      setAttendanceUpdating(true);
+      try {
+        const action = isSignedIn ? "signOffJob" : "signInJob";
+        const response = await axios.put(
+          `${environment.apiUrl}/job/${action}/${jobId}`,
+          body,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.data.success) throw new Error(response.data.message || "Attendance update failed");
+        await fetchJobs();
+        Swal.fire("Updated", `You have been signed ${isSignedIn ? "out" : "in"}.`, "success");
+      } catch (error) {
+        Swal.fire("Error", error.response?.data?.message || error.message || "Could not update attendance.", "error");
+      } finally {
+        setAttendanceUpdating(false);
       }
     };
   
@@ -355,6 +431,38 @@ import { useAuth } from "../../auth/AuthContext";
       },
     ];
 
+    if (userStaff) {
+      columns.splice(columns.length - 1, 0, {
+        field: "attendance",
+        headerName: "Attendance",
+        flex: 0.7,
+        sortable: false,
+        filterable: false,
+        renderCell: (params) => {
+          const assignment = params.row.currentStaffAssignment || {};
+          const isSignedIn = !!assignment.isSignIn && !assignment.isSignOff;
+          const signInDisabled = !isSignedIn && (
+            params.row.jobStatus !== "InProgress" || Boolean(activeJob)
+          );
+          return (
+            <Tooltip title={signInDisabled && activeJob ? "Sign out of your current task before starting another." : ""}>
+              <span>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color={isSignedIn ? "error" : "success"}
+                  disabled={attendanceUpdating || signInDisabled}
+                  onClick={() => handleAttendanceToggle(params.row)}
+                >
+                  {isSignedIn ? "Sign Out" : "Sign In"}
+                </Button>
+              </span>
+            </Tooltip>
+          );
+        },
+      });
+    }
+
     if (shouldShowButton) {
       columns.splice(6, 0, { field: "orgNoOfhours", headerName: "Original No Hours", flex: 0.4 });
       columns.splice(7, 0, { field: "orgTotal", headerName: "Total Payment", flex: 0.4 });
@@ -378,6 +486,55 @@ import { useAuth } from "../../auth/AuthContext";
             </Box>
           )}
         </Box>
+        {userStaff && (
+          <Paper
+            variant="outlined"
+            sx={{
+              mb: 2.5,
+              p: 2.5,
+              borderWidth: 2,
+              borderColor: "success.main",
+              borderRadius: 3,
+              backgroundColor: "rgba(46, 125, 50, 0.045)",
+            }}
+          >
+            {activeJob?.currentStaffAssignment?.isSignIn && !activeJob?.currentStaffAssignment?.isSignOff ? (
+              <Box display="flex" alignItems="center" justifyContent="space-between" gap={2} flexWrap="wrap">
+                <Box>
+                  <Typography variant="overline" color="success.dark" fontWeight={700}>Current task</Typography>
+                  <Typography variant="h6" fontWeight={700}>{activeJob.jobName}</Typography>
+                  <Typography color="text.secondary">
+                    {[activeJob.client?.firstName, activeJob.client?.lastName].filter(Boolean).join(" ")}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Signed in at {activeJob.currentStaffAssignment.signInTime ? new Date(activeJob.currentStaffAssignment.signInTime).toLocaleTimeString() : "—"}
+                  </Typography>
+                </Box>
+                <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+                  <Box>
+                    <Typography variant="caption" color="text.secondary">Time spent</Typography>
+                    <Typography variant="h4" color="success.dark" fontWeight={700} sx={{ fontVariantNumeric: "tabular-nums" }}>
+                      {formatElapsedTime(activeJob.currentStaffAssignment.signInTime, currentTime)}
+                    </Typography>
+                  </Box>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    disabled={attendanceUpdating}
+                    onClick={() => handleAttendanceToggle(activeJob)}
+                  >
+                    Sign Out
+                  </Button>
+                </Box>
+              </Box>
+            ) : (
+              <Box>
+                <Typography variant="h6" color="success.dark" fontWeight={700}>No active task</Typography>
+                <Typography color="text.secondary">Choose an in-progress task below and sign in to start tracking your work time.</Typography>
+              </Box>
+            )}
+          </Paper>
+        )}
         {/* <Box
           display="flex"
           justifyContent="flex-start"

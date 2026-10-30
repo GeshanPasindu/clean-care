@@ -11,6 +11,16 @@ import { filterBarSx, pageContainerSx, tableSurfaceSx } from "../../styles/uiSty
 
 const formatDateTime = (value) => value ? new Date(value).toLocaleString() : "—";
 
+const formatHoursMinutes = (value) => {
+  const numericHours = Number(value || 0);
+  const totalMinutes = Number.isFinite(numericHours) ? Math.max(0, Math.round(numericHours * 60)) : 0;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!hours) return `${minutes}m`;
+  if (!minutes) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+};
+
 function Timesheets() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -117,7 +127,7 @@ function Timesheets() {
       minWidth: 180,
       valueFormatter: ({ value }) => formatDateTime(value),
     },
-    { field: "hours", headerName: "Hours", minWidth: 90, valueFormatter: ({ value }) => Number(value || 0).toFixed(2) },
+    { field: "hours", headerName: "Hours", minWidth: 110, valueFormatter: ({ value }) => formatHoursMinutes(value) },
     { field: "description", headerName: "Work Description", minWidth: 280, flex: 1.5, sortable: false },
   ];
 
@@ -194,7 +204,7 @@ function Timesheets() {
         </Button>
         <Box sx={{ display: "flex", alignItems: "center", gap: 1, ml: "auto" }}>
           <AccessTimeIcon color="action" />
-          <Typography color="text.secondary">{total} sessions · {totalHours.toFixed(2)} total hours</Typography>
+          <Typography color="text.secondary">{total} sessions · {formatHoursMinutes(totalHours)} total time</Typography>
         </Box>
       </Box>
       {error && <Typography color="error" sx={{ mb: 1.5 }}>{error}</Typography>}

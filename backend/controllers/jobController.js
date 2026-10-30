@@ -557,16 +557,48 @@ export const getAllCompletedJobs = async (req, res) => {
 
 export const signInJob = async (req, res) => {
   const { staffId } = req.body || {};
+  let targetStaffId;
+  let activeJobClaimed = false;
+  let attendanceSaved = false;
   try {
     const job = await Job.findOne({ _id: req.params.jobId, ...(await jobScope(req)) });
     if (!job) return res.status(404).json({ message: "Job not found" });
-    const targetStaffId = req.user.role === "staff" ? await getStaffProfileId(req.user) : staffId;
+    targetStaffId = req.user.role === "staff" ? await getStaffProfileId(req.user) : staffId;
     if (!validId(targetStaffId)) return res.status(400).json({ message: "A valid assigned staff member is required" });
     const assignment = ensureStaffAssignments(job).find((item) =>
       referenceId(item.staff) === String(targetStaffId) && item.isAssigned !== false
     );
     if (!assignment) return res.status(403).json({ message: "Only currently assigned staff members can sign in" });
     if (assignment.isSignIn && !assignment.isSignOff) return res.status(409).json({ message: "This staff member is already signed in" });
+
+    const assignedJobs = await Job.find({
+      $or: [
+        { assignedStaff: targetStaffId },
+        { "staffAssignments.staff": targetStaffId },
+      ],
+    });
+    const hasActiveSession = assignedJobs.some((assignedJob) =>
+      ensureStaffAssignments(assignedJob).some((item) =>
+        referenceId(item.staff) === String(targetStaffId)
+        && item.isAssigned !== false
+        && item.isSignIn
+        && !item.isSignOff
+      )
+    );
+    if (hasActiveSession) {
+      return res.status(409).json({ message: "You are already signed in to another task. Sign out before starting a new one." });
+    }
+
+    const claimedStaff = await Staff.findOneAndUpdate(
+      { _id: targetStaffId, activeJob: null },
+      { $set: { activeJob: job._id } },
+      { new: true, projection: { _id: 1 } }
+    );
+    if (!claimedStaff) {
+      return res.status(409).json({ message: "You are already signed in to another task. Sign out before starting a new one." });
+    }
+    activeJobClaimed = true;
+
     const signInTime = new Date();
     assignment.timeEntries.push({ signInTime, signOffTime: null, hours: 0, hourRate: Number(assignment.hourRate || 0) });
     assignment.signInTime = signInTime;
@@ -577,8 +609,12 @@ export const signInJob = async (req, res) => {
     refreshJobTotals(job);
     refreshAttendanceSummary(job);
     await job.save();
+    attendanceSaved = true;
     return res.status(200).json({ response_code: 200, success: true, message: "Staff signed in successfully", job: presentJob(job, req), data: presentJob(job, req) });
   } catch (error) {
+    if (activeJobClaimed && !attendanceSaved) {
+      await Staff.updateOne({ _id: targetStaffId, activeJob: req.params.jobId }, { $set: { activeJob: null } }).catch(() => {});
+    }
     const status = error.name === "VersionError" ? 409 : 400;
     return res.status(status).json({ response_code: status, success: false, message: status === 409 ? "This job changed during the update. Refresh and try again." : error.message });
   }
@@ -617,6 +653,7 @@ export const signOffJob = async (req, res) => {
     refreshJobTotals(job);
     refreshAttendanceSummary(job);
     await job.save();
+    await Staff.updateOne({ _id: targetStaffId, activeJob: job._id }, { $set: { activeJob: null } });
     return res.status(200).json({ response_code: 200, success: true, message: "Staff signed off successfully", job: presentJob(job, req), data: presentJob(job, req) });
   } catch (error) {
     const status = error.name === "VersionError" ? 409 : 400;

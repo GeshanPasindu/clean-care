@@ -83,6 +83,11 @@ const staffSchema = new Schema(
             default: 'active',
             required: true,
         },
+        activeJob: {
+            type: Schema.Types.ObjectId,
+            ref: 'Job',
+            default: null,
+        },
         
         
     },

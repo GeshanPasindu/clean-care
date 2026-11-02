@@ -1,46 +1,10 @@
 import mongoose from "mongoose";
-import Admin from "../models/adminModel.js";
-import Client from "../models/clientModel.js";
 import Invoice from "../models/invoiceModel.js";
 import Staff from "../models/staffModel.js";
 import User from "../models/userModel.js";
+import { adminScope, getAdminProfileId, getStaffProfileId, invoiceScope, jobScope } from "../services/authorizationService.js";
 
-export async function getAdminProfileId(user) {
-  if (user?.adminDetails && mongoose.isValidObjectId(user.adminDetails)) {
-    return user.adminDetails;
-  }
-  if (!user?._id) return null;
-  const admin = await Admin.findOne({ user: user._id }).select("_id");
-  return admin?._id || null;
-}
-
-export async function getStaffProfileId(user) {
-  if (user?.staffDetails && mongoose.isValidObjectId(user.staffDetails)) {
-    return user.staffDetails;
-  }
-  if (!user?._id) return null;
-  const staff = await Staff.findOne({ user: user._id }).select("_id");
-  return staff?._id || null;
-}
-
-export async function adminScope(req) {
-  if (req.user?.role === "superAdmin") return {};
-  const adminId = await getAdminProfileId(req.user);
-  // Older records stored the owning User id in fields that now reference Admin.
-  // Accept that legacy value for the same authenticated admin during migration.
-  return adminId
-    ? { adminId: { $in: [adminId, req.user._id] } }
-    : { adminId: { $in: [] } };
-}
-
-export async function jobScope(req) {
-  if (req.user?.role === "superAdmin") return {};
-  if (req.user?.role === "staff") {
-    const staffId = await getStaffProfileId(req.user);
-    return staffId ? { assignedStaff: staffId } : { assignedStaff: { $in: [] } };
-  }
-  return adminScope(req);
-}
+export { adminScope, getAdminProfileId, getStaffProfileId, invoiceScope, jobScope };
 
 export function requireOwnedRecord(Model, { param = "id", ownerField = "adminId", ownerType = "admin" } = {}) {
   return async (req, res, next) => {
@@ -92,12 +56,6 @@ export const requireUserRecordAccess = (param = "id") => async (req, res, next) 
     return next(error);
   }
 };
-
-export async function invoiceScope(req) {
-  if (req.user?.role === "superAdmin") return {};
-  const clients = await Client.distinct("_id", await adminScope(req));
-  return { client: { $in: clients } };
-}
 
 export const requireInvoiceRecord = (param = "id") => async (req, res, next) => {
   const id = req.params[param];

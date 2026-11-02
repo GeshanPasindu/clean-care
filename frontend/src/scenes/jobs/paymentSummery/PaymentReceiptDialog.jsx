@@ -13,10 +13,9 @@ import {
   Typography,
 } from "@mui/material";
 import PrintIcon from "@mui/icons-material/Print";
-import axios from "axios";
-import { getAccessToken } from "../../../auth/apiClient";
-import { environment } from "../../../environment";
 import logo from "../../../assets/logo/logo.png";
+import { useServiceMutation } from "../../../queries/queryHelpers";
+import { jobService } from "../jobService";
 
 const paymentMethods = ["Cash", "Bank Transfer", "Card", "Cheque", "Other"];
 
@@ -104,10 +103,13 @@ const PaymentReceiptDocument = ({ job, receipt, draft }) => {
 };
 
 const PaymentReceiptDialog = ({ open, job, onClose, onPaymentSaved }) => {
-  const token = getAccessToken();
+  const recordPayment = useServiceMutation(
+    ({ jobId, values }) => jobService.recordClientPayment(jobId, values),
+    { invalidate: [["jobs"]] }
+  );
   const [values, setValues] = useState({ amount: "", paymentDate: todayInputDate(), method: "Cash", referenceNumber: "" });
   const [selectedReceipt, setSelectedReceipt] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const saving = recordPayment.isPending;
   const [errorMessage, setErrorMessage] = useState("");
   const receipts = job?.receivedPayments || [];
   const totalDue = Number(job?.orgTotal || job?.payment || 0);
@@ -135,25 +137,18 @@ const PaymentReceiptDialog = ({ open, job, onClose, onPaymentSaved }) => {
   };
 
   const handleRecordPayment = async () => {
-    setSaving(true);
     setErrorMessage("");
     try {
-      const response = await axios.post(
-        `${environment.apiUrl}/job/${job._id}/receivedPayments`,
-        values,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const response = await recordPayment.mutateAsync({ jobId: job._id, values });
       const updatedJob = {
         ...job,
-        receivedPayments: [...receipts, response.data.receipt],
+        receivedPayments: [...receipts, response.receipt],
       };
-      setSelectedReceipt(response.data.receipt);
+      setSelectedReceipt(response.receipt);
       setValues((current) => ({ ...current, amount: "" }));
       onPaymentSaved?.(updatedJob);
     } catch (error) {
-      setErrorMessage(error.response?.data?.message || "Could not record this payment. Please try again.");
-    } finally {
-      setSaving(false);
+      setErrorMessage(error.message || "Could not record this payment. Please try again.");
     }
   };
 

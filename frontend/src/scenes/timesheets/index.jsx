@@ -1,13 +1,15 @@
 import { AccessTime as AccessTimeIcon, FilterAltOff as FilterAltOffIcon } from "@mui/icons-material";
 import { Box, Button, MenuItem, TextField, Typography } from "@mui/material";
 import { DataGrid, GridToolbar } from "@mui/x-data-grid";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import axios from "../../auth/apiClient";
 import Header from "../../components/Header";
 import { useAuth } from "../../auth/AuthContext";
-import { environment } from "../../environment";
 import { filterBarSx, pageContainerSx, tableSurfaceSx } from "../../styles/uiStyles";
+import { useServiceQuery } from "../../queries/queryHelpers";
+import { adminService } from "../../services/adminService";
+import { staffService } from "../../services/staffService";
+import { jobService } from "../jobs/jobService";
 
 const formatDateTime = (value) => value ? new Date(value).toLocaleString() : "—";
 
@@ -24,74 +26,45 @@ const formatHoursMinutes = (value) => {
 function Timesheets() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [rows, setRows] = useState([]);
-  const [staffOptions, setStaffOptions] = useState([]);
-  const [supervisorOptions, setSupervisorOptions] = useState([]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
-  const [total, setTotal] = useState(0);
-  const [totalHours, setTotalHours] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
   const isStaff = user?.role === "staff";
   const isSuperAdmin = user?.role === "superAdmin";
   const staffId = searchParams.get("staffId") || "";
   const supervisorId = searchParams.get("supervisorId") || "";
-
-  useEffect(() => {
-    if (isStaff) return undefined;
-    let active = true;
-    axios.get(`${environment.apiUrl}/staff/getAllStaff`)
-      .then(({ data }) => {
-        if (active && data.success) setStaffOptions(data.staffs || []);
-      })
-      .catch(() => {
-        if (active) setError("Could not load staff filters.");
-      });
-    return () => { active = false; };
-  }, [isStaff]);
-
-  useEffect(() => {
-    if (!isSuperAdmin) return undefined;
-    let active = true;
-    axios.get(`${environment.apiUrl}/admin/getAllAdmins`)
-      .then(({ data }) => {
-        if (active && data.success) setSupervisorOptions(data.admins || []);
-      })
-      .catch(() => {
-        if (active) setError("Could not load supervisor filters.");
-      });
-    return () => { active = false; };
-  }, [isSuperAdmin]);
-
-  const fetchTimesheets = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const params = new URLSearchParams({ page: String(page + 1), limit: String(pageSize) });
-      if (staffId && !isStaff) params.set("staffId", staffId);
-      if (supervisorId && !isStaff) params.set("supervisorId", supervisorId);
-      if (startDate) params.set("startDate", startDate);
-      if (endDate) params.set("endDate", endDate);
-      const { data } = await axios.get(`${environment.apiUrl}/job/timesheets?${params.toString()}`);
-      setRows(data.timesheets || []);
-      setTotal(data.paginationInfo?.total || 0);
-      setTotalHours(Number(data.totalHours || 0));
-    } catch (requestError) {
-      setRows([]);
-      setTotal(0);
-      setTotalHours(0);
-      setError(requestError.response?.data?.message || "Could not load timesheets.");
-    } finally {
-      setLoading(false);
-    }
-  }, [endDate, isStaff, page, pageSize, staffId, startDate, supervisorId]);
-
-  useEffect(() => {
-    fetchTimesheets();
-  }, [fetchTimesheets]);
+  const filters = {
+    page: page + 1,
+    limit: pageSize,
+    ...(!isStaff && staffId ? { staffId } : {}),
+    ...(!isStaff && supervisorId ? { supervisorId } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
+  };
+  const timesheetsQuery = useServiceQuery(
+    ["timesheets", filters],
+    () => jobService.getTimesheets(filters)
+  );
+  const staffQuery = useServiceQuery(["staff", "list"], staffService.getAll, {
+    enabled: !isStaff,
+  });
+  const adminsQuery = useServiceQuery(["admins", "list"], adminService.getAll, {
+    enabled: isSuperAdmin,
+  });
+  const rows = timesheetsQuery.data?.timesheets || [];
+  const total = timesheetsQuery.data?.paginationInfo?.total || 0;
+  const totalHours = Number(timesheetsQuery.data?.totalHours || 0);
+  const staffOptions = staffQuery.data?.staffs || [];
+  const supervisorOptions = adminsQuery.data?.admins || [];
+  const loading = timesheetsQuery.isPending;
+  const error = timesheetsQuery.isError
+    ? timesheetsQuery.error.message || "Could not load timesheets."
+    : staffQuery.isError
+      ? "Could not load staff filters."
+      : adminsQuery.isError
+        ? "Could not load supervisor filters."
+        : "";
 
   const clearFilters = () => {
     const nextParams = new URLSearchParams(searchParams);

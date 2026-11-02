@@ -1,38 +1,16 @@
-import { getAccessToken } from "../../auth/apiClient";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Box, Button, Typography } from "@mui/material";
 import PrintIcon from "@mui/icons-material/Print";
 import { useParams } from "react-router-dom";
-import axios from "axios";
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { pageContainerSx } from "../../styles/uiStyles";
 import InvoicePreview from "./InvoicePreview";
+import { useInvoice } from "./invoiceQueries";
 
 const ViewInvoice = () => {
   const { id } = useParams();
-  const [invoice, setInvoice] = useState(null);
-  const [loadError, setLoadError] = useState(false);
-  const token = getAccessToken();
-
-  useEffect(() => {
-    let isCurrent = true;
-    const fetchInvoiceDetails = async () => {
-      try {
-        const response = await axios.get(`${environment.apiUrl}/invoice/getInvoiceById/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (isCurrent && response.data.success) setInvoice(response.data.invoice);
-        else if (isCurrent) setLoadError(true);
-      } catch (error) {
-        console.error("Error fetching invoice details:", error);
-        if (isCurrent) setLoadError(true);
-      }
-    };
-
-    fetchInvoiceDetails();
-    return () => { isCurrent = false; };
-  }, [id, token]);
+  const invoiceQuery = useInvoice(id);
+  const invoice = invoiceQuery.data?.invoice || null;
 
   return (
     <>
@@ -68,8 +46,8 @@ const ViewInvoice = () => {
         {invoice ? (
           <InvoicePreview invoice={invoice} client={invoice.client} invoiceNumber={invoice._id} />
         ) : (
-          <Typography color={loadError ? "error" : "text.secondary"}>
-            {loadError ? "Unable to load this invoice." : "Loading invoice..."}
+          <Typography color={invoiceQuery.isError ? "error" : "text.secondary"}>
+            {invoiceQuery.isError ? "Unable to load this invoice." : "Loading invoice..."}
           </Typography>
         )}
       </Box>

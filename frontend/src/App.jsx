@@ -30,7 +30,7 @@ import EditProfile from "./scenes/profile/EditProfile";
 import { ColorModeContext, useMode } from "./theme";
 import ClientJobs from "./scenes/clients/ClientJobs .jsx";
 import Dashboard from "./scenes/dashboard/dashboard.jsx";
-import PrivateRoute from "./PrivateRoutes.js";
+import PrivateRoute from "./PrivateRoutes.jsx";
 import Admin from "./scenes/admins/index.jsx";
 import CreateAdmin from "./scenes/admins/CreateAdmin.jsx";
 import ViewAdmin from "./scenes/admins/ViewAdmin.jsx";

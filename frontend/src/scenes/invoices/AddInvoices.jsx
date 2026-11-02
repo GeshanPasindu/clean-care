@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
     Box,
     Button,
@@ -12,54 +11,29 @@ import {
   import AlertTitle from "@mui/material/AlertTitle";
   import useMediaQuery from "@mui/material/useMediaQuery";
   import { Formik } from "formik";
-  import React, { useState, useEffect } from "react";
+  import React, { useState } from "react";
   import { useNavigate } from "react-router-dom";
   import * as yup from "yup";
-  import axios from "axios";
   import Header from "../../components/Header";
-  import { environment } from "../../environment";
   import { pageContainerSx, surfaceSx } from "../../styles/uiStyles";
   import InvoicePreview from "./InvoicePreview";
+  import { useActiveClients } from "../clients/clientQueries";
+  import { useCreateInvoice } from "./invoiceQueries";
   
   const AddInvoice = () => {
     const isNonMobile = useMediaQuery("(min-width:600px)");
-    const [loading, setLoading] = useState(false);
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [alertMessage, setAlertMessage] = useState("");
     const [alertSeverity, setAlertSeverity] = useState("success");
-    const [clients, setClients] = useState([]);
+    const { data: clientsResponse } = useActiveClients();
+    const clients = clientsResponse?.clients || [];
+    const createInvoice = useCreateInvoice();
     const navigate = useNavigate();
   
-    useEffect(() => {
-      fetchClients();
-    }, []);
-    const token = getAccessToken();
-  
-    const fetchClients = async () => {
-      try {
-        const headers = { Authorization: `Bearer ${token}` };
-        const response = await axios.get(environment.apiUrl + "/client/getAllActiveClient", { headers });
-        if (response.data.success) {
-          setClients(response.data.clients);
-        } else {
-          setAlertSeverity("error");
-          setAlertMessage("Failed to fetch clients");
-          setOpenSnackbar(true);
-        }
-      } catch (error) {
-        console.error("Error fetching clients:", error);
-        setAlertSeverity("error");
-        setAlertMessage("Failed to fetch clients");
-        setOpenSnackbar(true);
-      }
-    };
-  
     const handleFormSubmit = async (values, { resetForm }) => {
-      setLoading(true);
       try {
-        const headers = { Authorization: `Bearer ${token}` };
-        const response = await axios.post(environment.apiUrl + "/invoice/addInvoice", values, { headers });
-        if (response.data.success) {
+        const response = await createInvoice.mutateAsync(values);
+        if (response.success) {
           setAlertSeverity("success");
           setAlertMessage("Invoice Added Successfully");
           setTimeout(() => {
@@ -68,14 +42,13 @@ import {
           resetForm();
         } else {
           setAlertSeverity("error");
-          setAlertMessage(response.data.message || "Failed to add invoice");
+          setAlertMessage(response.message || "Failed to add invoice");
         }
       } catch (error) {
         console.error("Error creating invoice:", error);
         setAlertSeverity("error");
-        setAlertMessage("Failed to add invoice");
+        setAlertMessage(error.message || "Failed to add invoice");
       } finally {
-        setLoading(false);
         setOpenSnackbar(true);
       }
     };
@@ -218,7 +191,7 @@ import {
                     <Button
                       type="submit"
                       variant="contained"
-                      disabled={loading}
+                      disabled={createInvoice.isPending}
                       sx={{
                         backgroundColor: "#6870fa",
                         color: "white",
@@ -226,7 +199,7 @@ import {
                         "&:hover": { backgroundColor: "#3e4396" },
                       }}
                     >
-                      {loading ? "Adding..." : "Create invoice"}
+                      {createInvoice.isPending ? "Adding..." : "Create invoice"}
                     </Button>
                   </Box>
                 </Box>

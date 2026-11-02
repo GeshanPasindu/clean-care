@@ -2,12 +2,12 @@ import { Box, Button, Chip, Paper, Table, TableBody, TableCell, TableContainer, 
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import Header from "../../components/Header";
-import axios from "../../auth/apiClient";
-import { environment } from "../../environment";
 import DetailGrid from "../../components/DetailGrid";
 import { pageContainerSx } from "../../styles/uiStyles";
 import { useAuth } from "../../auth/AuthContext";
 import Swal from "sweetalert2";
+import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
+import { jobService } from "./jobService";
 
 function ViewJob() {
   const { user } = useAuth();
@@ -19,6 +19,13 @@ function ViewJob() {
 
 
   const { id } = useParams();
+  const jobQuery = useServiceQuery(["jobs", "detail", id], () => jobService.getById(id), {
+    enabled: Boolean(id),
+  });
+  const updateAttendance = useServiceMutation(
+    ({ action, jobId, body }) => jobService.updateAction(action, jobId, body),
+    { invalidate: [["jobs", "detail", id], ["jobs"]] }
+  );
   const [jobDetails, setJobDetails] = useState({
     jobName: "",
     description: "",
@@ -41,7 +48,7 @@ function ViewJob() {
     notes: "",
     jobDate:"",
   });
-  const [attendanceUpdating, setAttendanceUpdating] = useState(false);
+  const attendanceUpdating = updateAttendance.isPending;
 
   const fieldNames = {
     jobName: "Job Name",
@@ -60,51 +67,37 @@ function ViewJob() {
   };
 
   useEffect(() => {
-    fetchJobDetails();
-  }, [id]);
-
-  const fetchJobDetails = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + `/job/getJobById/${id}`);
-      const responseData = response.data;
-      console.log(responseData)
-      if (responseData.success) {
-        const { job } = responseData;
-        const { jobName, description, client, assignedStaff, orgNoOfhours, orgHourRate, estNoOfhours, staffHourRate, orgTotal, staffPayTotal, jobStatus, notes ,jobDate } = job;
-        const formattedClient = {
-          firstName: client.firstName,
-          lastName: client.lastName,
-          phoneNumber: client.phoneNumber,
-          address:client.address
-        };
-        const formattedAssignedStaff = (Array.isArray(assignedStaff) ? assignedStaff : [assignedStaff])
-          .map((staff) => `${staff?.firstName || ""} ${staff?.lastName || ""}`.trim())
-          .filter(Boolean)
-          .join(", ");
-        setJobDetails({
-          jobName,
-          description,
-          client: formattedClient,
-          assignedStaff: formattedAssignedStaff,
-          staffAssignments: Array.isArray(job.staffAssignments) ? job.staffAssignments : [],
-          currentStaffAssignment: job.currentStaffAssignment || null,
-          orgNoOfhours,
-          orgHourRate,
-          estNoOfhours,
-          staffHourRate,
-          orgTotal,
-          staffPayTotal,
-          jobStatus,
-          notes,
-          jobDate: jobDate ? new Date(jobDate).toLocaleString() : "",
-        });
-      } else {
-        console.error("Failed to fetch job details:");
-      }
-    } catch (error) {
-      console.error("Error fetching job details:", error);
-    }
-  };
+    const job = jobQuery.data?.job;
+    if (!job) return;
+    const { jobName, description, client = {}, assignedStaff, orgNoOfhours, orgHourRate, estNoOfhours, staffHourRate, orgTotal, staffPayTotal, jobStatus, notes, jobDate } = job;
+    const formattedClient = {
+      firstName: client.firstName || "",
+      lastName: client.lastName || "",
+      phoneNumber: client.phoneNumber || "",
+      address: client.address || "",
+    };
+    const formattedAssignedStaff = (Array.isArray(assignedStaff) ? assignedStaff : [assignedStaff])
+      .map((staff) => `${staff?.firstName || ""} ${staff?.lastName || ""}`.trim())
+      .filter(Boolean)
+      .join(", ");
+    setJobDetails({
+      jobName,
+      description,
+      client: formattedClient,
+      assignedStaff: formattedAssignedStaff,
+      staffAssignments: Array.isArray(job.staffAssignments) ? job.staffAssignments : [],
+      currentStaffAssignment: job.currentStaffAssignment || null,
+      orgNoOfhours,
+      orgHourRate,
+      estNoOfhours,
+      staffHourRate,
+      orgTotal,
+      staffPayTotal,
+      jobStatus,
+      notes,
+      jobDate: jobDate ? new Date(jobDate).toLocaleString() : "",
+    });
+  }, [jobQuery.data]);
 
   const handleAttendanceToggle = async () => {
     const assignment = jobDetails.currentStaffAssignment || {};
@@ -125,16 +118,13 @@ function ViewJob() {
       if (!result.isConfirmed) return;
       body = { description: result.value.trim() };
     }
-    setAttendanceUpdating(true);
     try {
-      const response = await axios.put(`${environment.apiUrl}/job/${action}/${id}`, body);
-      if (!response.data.success) throw new Error(response.data.message || "Attendance update failed");
-      await fetchJobDetails();
+      const response = await updateAttendance.mutateAsync({ action, jobId: id, body });
+      if (!response.success) throw new Error(response.message || "Attendance update failed");
+      await jobQuery.refetch();
       Swal.fire("Updated", `You have been signed ${isSignedIn ? "out" : "in"}.`, "success");
     } catch (error) {
-      Swal.fire("Error", error.response?.data?.message || error.message || "Could not update attendance.", "error");
-    } finally {
-      setAttendanceUpdating(false);
+      Swal.fire("Error", error.message || "Could not update attendance.", "error");
     }
   };
 

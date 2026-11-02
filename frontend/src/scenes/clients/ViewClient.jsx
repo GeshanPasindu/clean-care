@@ -1,18 +1,16 @@
-import { getAccessToken } from "../../auth/apiClient";
 import { Box, Button } from "@mui/material";
-import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import Header from "../../components/Header";
-import axios from "axios";
-import { environment } from '../../environment';
 import { Link } from "react-router-dom";
 import DetailGrid from "../../components/DetailGrid";
 import { pageContainerSx, pageHeaderRowSx } from "../../styles/uiStyles";
+import { useClient } from "./clientQueries";
 
 
 const ViewClient = () => {
   const { id } = useParams();
-  const [clientDetails, setClientDetails] = useState({
+  const { data: responseData } = useClient(id);
+  const clientDetails = responseData?.client || {
     firstName: "",
     lastName: "",
     email: "",
@@ -24,28 +22,6 @@ const ViewClient = () => {
     accountManager: "",
     notes: "",
     clientStatus: "",
-  });
-
-  useEffect(() => {
-    fetchClientDetails();
-  }, [id]);
-
-  const token = getAccessToken();
-
-  const fetchClientDetails = async () => {
-    try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const response = await axios.get(environment.apiUrl + `/client/getClientById/${id}`, { headers });
-      const responseData = response.data;
-      if (responseData.success) {
-        const { client } = responseData;
-        setClientDetails(client);
-      } else {
-        console.error("Failed to fetch client details:");
-      }
-    } catch (error) {
-      console.error("Error fetching client details:", error);
-    }
   };
 
   return (

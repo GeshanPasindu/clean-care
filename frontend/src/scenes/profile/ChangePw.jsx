@@ -9,15 +9,15 @@ import {
   TextField,
 } from "@mui/material";
 import useMediaQuery from "@mui/material/useMediaQuery";
-import axios from "axios";
 import { Formik } from "formik";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as yup from "yup";
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { useAuth } from "../../auth/AuthContext";
 import { formPageSx } from "../../styles/uiStyles";
+import { useServiceMutation } from "../../queries/queryHelpers";
+import { authService } from "../../services/authService";
 
 const CreateNewUser = () => {
   const navigate = useNavigate();
@@ -29,35 +29,23 @@ const CreateNewUser = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const changePassword = useServiceMutation(authService.changePassword);
   
 
   const handleFormSubmit = async (values) => {
     try {
-      const response = await axios.post(
-        environment.apiUrl + "/auth/change-password",
-        {
-          currentPassword: values.currentPassword,
-          newPassword: values.newPassword,
-        }
-      );
+      await changePassword.mutateAsync({
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
+      });
 
-      if (response.status === 200) {
-        setAlertSeverity("success");
-        setAlertMessage("Password changed successfully.");
-        setOpenSnackbar(true);
-        setTimeout(() => {
-          setOpenSnackbar(false);
-          logout().finally(() => navigate("/", { replace: true }));
-        }, 2000);
-      } else if (response.status === 400) {
-        setAlertSeverity("error");
-        setAlertMessage("Incorrect old password!");
-        setOpenSnackbar(true);
-      } else {
-        setAlertSeverity("error");
-        setAlertMessage("Failed to change password. Please try again.");
-        setOpenSnackbar(true);
-      }
+      setAlertSeverity("success");
+      setAlertMessage("Password changed successfully.");
+      setOpenSnackbar(true);
+      setTimeout(() => {
+        setOpenSnackbar(false);
+        logout().finally(() => navigate("/", { replace: true }));
+      }, 2000);
     } catch (error) {
       console.error("API Error:", error);
       setAlertSeverity("error");

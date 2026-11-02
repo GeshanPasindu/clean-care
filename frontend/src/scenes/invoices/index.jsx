@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
     Delete as DeleteIcon,
     Visibility as VisibilityIcon,
@@ -8,48 +7,27 @@ import {
   import { DataGrid, GridToolbar } from "@mui/x-data-grid";
   import jsPDF from "jspdf";
   import "jspdf-autotable";
-  import React, { useEffect, useState } from "react";
+  import React, { useState } from "react";
   import { Link } from "react-router-dom";
   import Swal from "sweetalert2";
-  import axios from "axios";
   import Header from "../../components/Header";
-  import { environment } from "../../environment";
+  import { useDeleteInvoice, useInvoices, useUpdateInvoiceStatus } from "./invoiceQueries";
   import { actionButtonSx, filterBarSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
   
   const Invoices = () => {
-    const [data, setData] = useState([]);
-    const token = getAccessToken();
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
-  
-    const fetchInvoices = async () => {
-      try {
-        const headers = { Authorization: `Bearer ${token}` };
-        let url = `${environment.apiUrl}/invoice/getAllInvoices`
-        if (startDate && endDate) {
-          url += `?startDate=${startDate}&endDate=${endDate}`;
-        }
-        const response = await axios.get(url, { headers });
-        const responseData = response.data;
-        if (responseData.success) {
-          const modifiedData = responseData.invoices.map((item) => ({
-            ...item,
-            id: item._id,
-            clientName: `${item.client.firstName} ${item.client.lastName}`,
-          }));
-          modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-          setData(modifiedData);
-        } else {
-          console.error("Failed to fetch invoices:", responseData.message);
-        }
-      } catch (error) {
-        console.error("Error fetching invoices:", error);
-      }
-    };
-  
-    useEffect(() => {
-      fetchInvoices();
-    }, []);
+    const [filters, setFilters] = useState({});
+    const { data: responseData, isPending } = useInvoices(filters);
+    const deleteInvoice = useDeleteInvoice();
+    const updateInvoiceStatus = useUpdateInvoiceStatus();
+    const data = (responseData?.invoices || [])
+      .map((item) => ({
+        ...item,
+        id: item._id,
+        clientName: [item.client?.firstName, item.client?.lastName].filter(Boolean).join(" "),
+      }))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   
     const exportToPdf = () => {
       const doc = new jsPDF();
@@ -79,18 +57,13 @@ import {
         confirmButtonText: "Delete",
       }).then((result) => {
         if (result.isConfirmed) {
-          const headers = { Authorization: `Bearer ${token}` };
-          axios
-            .delete(`${environment.apiUrl}/invoice/deleteInvoiceById/${id}`, { headers })
-            .then((response) => {
-              if (response.status !== 200) throw new Error("Failed to delete invoice");
-              setData(data.filter((item) => item.id !== id));
-              Swal.fire("Deleted!", "The invoice has been deleted.", "success");
-            })
-            .catch((error) => {
+          deleteInvoice.mutate(id, {
+            onSuccess: () => Swal.fire("Deleted!", "The invoice has been deleted.", "success"),
+            onError: (error) => {
               console.error("Error deleting invoice:", error);
               Swal.fire("Error!", "Failed to delete invoice. Please try again later.", "error");
-            });
+            },
+          });
         }
       });
     };
@@ -110,42 +83,21 @@ import {
           confirmButtonText: "Yes, change it!",
         }).then((result) => {
           if (result.isConfirmed) {
-  
-              const headers = {
-                Authorization: `Bearer ${token}`
-              };
-          
-            axios
-              .patch(environment.apiUrl + `/invoice/updateStatus/${id}`, { invoiceStatus: newStatus },{headers})
-              .then((response) => {
-                  console.log(response);
-                if (response.status !== 200) {
-                  throw new Error("Failed to update status");
-                }
-    
-                const updatedData = data.map((item) => {
-                  if (item.id === id) {
-                    return { ...item, invoiceStatus: newStatus };
-                  }
-                  return item;
-                });
-                setData(updatedData);
-                Swal.fire("Updated!", "The client status has been updated.", "success");
-              })
-              .catch((error) => {
-                console.error("Error updating client status:", error);
-                Swal.fire(
-                  "Error!",
-                  "Failed to update client status. Please try again later.",
-                  "error"
-                );
-              });
+            updateInvoiceStatus.mutate(
+              { id, status: newStatus },
+              {
+                onSuccess: () => Swal.fire("Updated!", "The invoice status has been updated.", "success"),
+                onError: (error) => {
+                  console.error("Error updating invoice status:", error);
+                  Swal.fire("Error!", "Failed to update invoice status. Please try again later.", "error");
+                },
+              }
+            );
           }
         });
       };
       const handleViewInvoices = () => {
-        console.log("view jobs")
-        fetchInvoices();
+        setFilters(startDate && endDate ? { startDate, endDate } : {});
       };
     const columns = [
       { field: "id", headerName: "Invoice ID", flex: 1 },
@@ -255,6 +207,7 @@ import {
           <DataGrid
             rows={data}
             columns={columns}
+            loading={isPending}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

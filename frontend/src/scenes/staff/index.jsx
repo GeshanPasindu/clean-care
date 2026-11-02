@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import AccessTimeIcon from "@mui/icons-material/AccessTime";
 import PaymentsIcon from "@mui/icons-material/Payments";
 import {
@@ -10,47 +9,20 @@ import {
   import { DataGrid, GridToolbar } from "@mui/x-data-grid";
   import jsPDF from "jspdf";
   import "jspdf-autotable";
-  import React, { useEffect, useState } from "react";
+  import React from "react";
   import { Link } from "react-router-dom";
   import Swal from "sweetalert2";
-  import axios from "axios";
   import Header from "../../components/Header";
-  import { environment } from "../../environment";
+  import { useChangeStaffStatus, useDeleteStaff, useStaff } from "./staffQueries";
   import { actionButtonSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
   
   const Staff = () => {
-    const [data, setData] = useState([]);
-  
-    const token = getAccessToken();
-  
-    const fetchStaff = async () => {
-      try {
-        const headers = {
-          Authorization: `Bearer ${token}`
-        };
-  
-        const response = await axios.get(`${environment.apiUrl}/staff/getAllStaff`, { headers });
-        const responseData = response.data;
-        if (responseData.success) {
-          const modifiedData = responseData.staffs.map((item) => ({
-            ...item,
-            id: item._id, // Set id for DataGrid row key
-          }));
-  
-          modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  
-          setData(modifiedData);
-        } else {
-          console.error("Failed to fetch staff:", responseData.message);
-        }
-      } catch (error) {
-        console.error("Error fetching staff:", error);
-      }
-    };
-  
-    useEffect(() => {
-      fetchStaff();
-    }, []);
+    const { data: responseData, isPending } = useStaff();
+    const deleteStaff = useDeleteStaff();
+    const changeStaffStatus = useChangeStaffStatus();
+    const data = (responseData?.staffs || [])
+      .map((item) => ({ ...item, id: item._id }))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   
     const exportToPdf = () => {
       const doc = new jsPDF();
@@ -78,27 +50,13 @@ import {
         confirmButtonText: "Delete",
       }).then((result) => {
         if (result.isConfirmed) {
-          const headers = {
-            Authorization: `Bearer ${token}`
-          };
-          axios
-            .delete(environment.apiUrl + `/staff/deleteStaffById/${id}`, { headers })
-            .then((response) => {
-              if (response.status !== 200) {
-                throw new Error("Failed to delete staff");
-              }
-  
-              setData(data.filter((item) => item.id !== id));
-              Swal.fire("Deleted!", "The staff has been deleted.", "success");
-            })
-            .catch((error) => {
+          deleteStaff.mutate(id, {
+            onSuccess: () => Swal.fire("Deleted!", "The staff has been deleted.", "success"),
+            onError: (error) => {
               console.error("Error deleting staff:", error);
-              Swal.fire(
-                "Error!",
-                "Failed to delete staff. Please try again later.",
-                "error"
-              );
-            });
+              Swal.fire("Error!", "Failed to delete staff. Please try again later.", "error");
+            },
+          });
         }
       });
     };
@@ -114,34 +72,16 @@ import {
         confirmButtonText: "Yes, change it!",
       }).then((result) => {
         if (result.isConfirmed) {
-          const headers = {
-            Authorization: `Bearer ${token}`
-          };
-  
-          axios
-            .patch(environment.apiUrl + `/staff/updateStatus/${id}`, { workStatus: newStatus }, { headers })
-            .then((response) => {
-              if (response.status !== 200) {
-                throw new Error("Failed to update status");
-              }
-  
-              const updatedData = data.map((item) => {
-                if (item.id === id) {
-                  return { ...item, workStatus: newStatus };
-                }
-                return item;
-              });
-              setData(updatedData);
-              Swal.fire("Updated!", "The staff status has been updated.", "success");
-            })
-            .catch((error) => {
-              console.error("Error updating staff status:", error);
-              Swal.fire(
-                "Error!",
-                "Failed to update staff status. Please try again later.",
-                "error"
-              );
-            });
+          changeStaffStatus.mutate(
+            { id, status: newStatus },
+            {
+              onSuccess: () => Swal.fire("Updated!", "The staff status has been updated.", "success"),
+              onError: (error) => {
+                console.error("Error updating staff status:", error);
+                Swal.fire("Error!", "Failed to update staff status. Please try again later.", "error");
+              },
+            }
+          );
         }
       });
     };
@@ -256,6 +196,7 @@ import {
           <DataGrid
             rows={data}
             columns={columns}
+            loading={isPending}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

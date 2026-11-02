@@ -1,16 +1,16 @@
-import { getAccessToken } from "../../auth/apiClient";
 import { Box, Button } from "@mui/material";
-import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import Header from "../../components/Header";
-import axios from "axios";
-import { environment } from "../../environment";
 import DetailGrid from "../../components/DetailGrid";
 import { pageContainerSx, pageHeaderRowSx } from "../../styles/uiStyles";
+import { useStaffById } from "./staffQueries";
+import { useServiceQuery } from "../../queries/queryHelpers";
+import { userService } from "../../services/userService";
 
 const ViewStaff = () => {
   const { id } = useParams();
-  const [staffDetails, setStaffDetails] = useState({
+  const staffQuery = useStaffById(id);
+  const staffDetails = staffQuery.data?.staff || {
     firstName: "",
     lastName: "",
     address: "",
@@ -27,52 +27,16 @@ const ViewStaff = () => {
     notes: "",
     workStatus: "",
     supervisorName: "",
-  });
-  const [userEmail, setUserEmail] = useState("");
-
-  useEffect(() => {
-    fetchStaffDetails();
-  }, [id]);
-
-  const token = getAccessToken();
-
-  const fetchStaffDetails = async () => {
-    try {
-      const headers = {
-        Authorization: `Bearer ${token}`,
-      };
-      const response = await axios.get(environment.apiUrl + `/staff/getStaffById/${id}`, { headers });
-      const responseData = response.data;
-      console.log("Staff Details:", responseData);
-      if (responseData.success) {
-        const { staff } = responseData;
-        setStaffDetails(staff);
-        fetchUserEmail(staff.user); // Fetch the user email
-      } else {
-        console.error("Failed to fetch staff details:");
-      }
-    } catch (error) {
-      console.error("Error fetching staff details:", error);
-    }
   };
-
-  const fetchUserEmail = async (userId) => {
-    try {
-      const headers = {
-        Authorization: `Bearer ${token}`,
-      };
-      const response = await axios.get(environment.apiUrl + `/user/getUser/${userId}`, { headers });
-      const responseData = response.data;
-      console.log("User Details:", responseData);
-      if (responseData.success) {
-        setUserEmail(responseData.userDetails.email);
-      } else {
-        console.error("Failed to fetch user email:");
-      }
-    } catch (error) {
-      console.error("Error fetching user email:", error);
-    }
-  };
+  const userId = typeof staffDetails.user === "object"
+    ? staffDetails.user?._id
+    : staffDetails.user;
+  const { data: userResponse } = useServiceQuery(
+    ["users", "detail", userId],
+    () => userService.getById(userId),
+    { enabled: Boolean(userId) }
+  );
+  const userEmail = userResponse?.userDetails?.email || "";
 
   return (
     <Box sx={{ ...pageContainerSx, maxWidth: 1100, mx: "auto" }}>

@@ -1,20 +1,18 @@
-import { getAccessToken } from "../../auth/apiClient";
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Box, Button, Grid, Snackbar, TextField, Typography } from '@mui/material';
 import MuiAlert from '@mui/material/Alert';
-import axios from 'axios';
 import { useNavigate, useParams } from "react-router-dom";
 import { useFormik } from 'formik';
 import * as yup from 'yup';
 import Header from "../../components/Header";
-import { environment } from '../../environment';
 import { formPageSx } from "../../styles/uiStyles";
+import { useClient, useUpdateClient } from "./clientQueries";
 
 const EditClient = () => {
   const { id } = useParams();
-  const token = getAccessToken();
-
-  const [clientDetails, setClientDetails] = useState({
+  const clientQuery = useClient(id);
+  const updateClient = useUpdateClient();
+  const clientDetails = clientQuery.data?.client || {
     firstName: "",
     lastName: "",
     email: "",
@@ -25,38 +23,13 @@ const EditClient = () => {
     contactEmail: "",
     accountManager: "",
     notes: "",
-  });
+  };
 
-  const [isLoading, setIsLoading] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [alertSeverity, setAlertSeverity] = useState('success');
   const [alertMessage, setAlertMessage] = useState('');
   const navigate = useNavigate();
   const clientName = [clientDetails.firstName, clientDetails.lastName].filter(Boolean).join(" ");
-
-  useEffect(() => {
-    fetchClientDetails();
-  }, [id]);
-
-  const fetchClientDetails = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + `/client/getClientById/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const responseData = response.data;
-      if (responseData.success) {
-        setClientDetails(responseData.client);
-        formik.setValues(responseData.client);
-      } else {
-        console.error('Failed to fetch client details:', responseData.message);
-      }
-    } catch (error) {
-      console.error('Error fetching client details:', error);
-    }
-  };
 
   const clientSchema = yup.object().shape({
     firstName: yup.string().required("First Name is required"),
@@ -76,16 +49,10 @@ const EditClient = () => {
     validationSchema: clientSchema,
     enableReinitialize: true,
     onSubmit: async (values) => {
-      setIsLoading(true);
-
       try {
-        const response = await axios.put(environment.apiUrl + `/client/updateClientById/${id}`, values, {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        });
+        const responseData = await updateClient.mutateAsync({ id, values });
 
-        if (response.status === 200) {
+        if (responseData.success) {
           setAlertSeverity('success');
           setAlertMessage('Client updated successfully');
           setTimeout(() => {
@@ -93,13 +60,12 @@ const EditClient = () => {
           }, 2000);
         } else {
           setAlertSeverity('error');
-          setAlertMessage(`Failed to update client: ${response.data.message}`);
+          setAlertMessage(`Failed to update client: ${responseData.message}`);
         }
       } catch (error) {
         setAlertSeverity('error');
         setAlertMessage(`Error updating client: ${error.message}`);
       } finally {
-        setIsLoading(false);
         setOpenSnackbar(true);
       }
     },
@@ -140,7 +106,7 @@ const EditClient = () => {
                 variant="contained"
                 color="primary"
                 type="submit"
-                disabled={isLoading}
+                disabled={updateClient.isPending}
                 sx={{
                   backgroundColor: '#6870fa',
                   color: 'white',
@@ -151,7 +117,7 @@ const EditClient = () => {
                   },
                 }}
               >
-                {isLoading ? 'Updating...' : 'Update Client'}
+                {updateClient.isPending ? 'Updating...' : 'Update Client'}
               </Button>
             </Grid>
           </Grid>

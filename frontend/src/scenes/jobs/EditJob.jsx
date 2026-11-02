@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import React, { useEffect, useState } from 'react';
 import {
   Box,
@@ -13,13 +12,15 @@ import {
   Typography,
 } from '@mui/material';
 import MuiAlert from '@mui/material/Alert';
-import axios from 'axios';
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../../components/Header";
-import { environment } from '../../environment';
 import { Formik, Form, Field, ErrorMessage } from 'formik';
 import * as yup from 'yup';
 import { formPageSx } from "../../styles/uiStyles";
+import { useActiveClients } from "../clients/clientQueries";
+import { useActiveStaff } from "../staff/staffQueries";
+import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
+import { jobService } from "./jobService";
 
 const jobSchema = yup.object().shape({
   jobName: yup.string().required("Job Name is required"),
@@ -36,7 +37,13 @@ const jobSchema = yup.object().shape({
 
 const EditJob = () => {
   const { id } = useParams();
-  const token = getAccessToken();
+  const clientsQuery = useActiveClients();
+  const staffsQuery = useActiveStaff();
+  const jobQuery = useServiceQuery(["jobs", "detail", id], () => jobService.getById(id), {
+    enabled: Boolean(id),
+  });
+  const clients = clientsQuery.data?.clients || [];
+  const staffs = staffsQuery.data?.staffs || [];
 
   const [jobDetails, setJobDetails] = useState({
     jobName: '',
@@ -51,123 +58,54 @@ const EditJob = () => {
     notes: '',
   });
 
-  const [clients, setClients] = useState([]);
-  const [staffs, setStaffs] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [alertSeverity, setAlertSeverity] = useState('success');
   const [alertMessage, setAlertMessage] = useState('');
   const navigate = useNavigate();
+  const updateJob = useServiceMutation(
+    ({ jobId, values }) => jobService.update(jobId, values),
+    { invalidate: [["jobs"]] }
+  );
 
   useEffect(() => {
-    fetchClients();
-    fetchStaffs();
-    fetchJobDetails();
-  }, []);
-
-  const fetchClients = async () => {
-    try {
-      const headers = {
-        Authorization: `Bearer ${token}`
-      };
-
-      const response = await axios.get(environment.apiUrl + "/client/getAllActiveClient", { headers });
-
-      if (response.data.success) {
-        setClients(response.data.clients);
-      } else {
-        setAlertSeverity("error");
-        setAlertMessage("Failed to fetch clients");
-        setOpenSnackbar(true);
-      }
-    } catch (error) {
-      console.error("Error fetching clients:", error);
-      setAlertSeverity("error");
-      setAlertMessage("Failed to fetch clients");
-      setOpenSnackbar(true);
-    }
-  };
-
-  const fetchStaffs = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + "/staff/getAllActiveStaff", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      if (response.data.success) {
-        setStaffs(response.data.staffs);
-      } else {
-        setAlertSeverity("error");
-        setAlertMessage("Failed to fetch staffs");
-        setOpenSnackbar(true);
-      }
-    } catch (error) {
-      console.error("Error fetching staffs:", error);
-      setAlertSeverity("error");
-      setAlertMessage("Failed to fetch staffs");
-      setOpenSnackbar(true);
-    }
-  };
-
-  const fetchJobDetails = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + `/job/getJobById/${id}`);
-      const responseData = response.data;
-
-      if (responseData.success) {
-        const job = responseData.job;
-        const assignedStaffIds = (Array.isArray(job.assignedStaff) ? job.assignedStaff : [job.assignedStaff])
-          .map((staff) => typeof staff === "object" ? staff?._id : staff)
-          .filter(Boolean);
-        const staffRatesById = Object.fromEntries((job.staffAssignments || []).map((assignment) => {
-          const staffId = typeof assignment.staff === "object" ? assignment.staff?._id : assignment.staff;
-          return [String(staffId), assignment.hourRate];
-        }));
-        setJobDetails({
-          jobName: job.jobName,
-          description: job.description,
-          client: job.client._id,
-          assignedStaff: assignedStaffIds,
-          staffRates: Object.fromEntries(assignedStaffIds.map((staffId) => [
-            staffId,
-            staffRatesById[staffId] ?? job.staffHourRate ?? "",
-          ])),
-          orgNoOfhours: job.orgNoOfhours,
-          orgHourRate: job.orgHourRate,
-          estNoOfhours: job.estNoOfhours,
-          staffHourRate: job.staffHourRate,
-          notes: job.notes,
-        });
-      } else {
-        console.error('Failed to fetch job details:', response.data.message);
-      }
-    } catch (error) {
-      console.error('Error fetching job details:', error);
-    }
-  };
+    const job = jobQuery.data?.job;
+    if (!job) return;
+    const assignedStaffIds = (Array.isArray(job.assignedStaff) ? job.assignedStaff : [job.assignedStaff])
+      .map((staff) => typeof staff === "object" ? staff?._id : staff)
+      .filter(Boolean);
+    const staffRatesById = Object.fromEntries((job.staffAssignments || []).map((assignment) => {
+      const staffId = typeof assignment.staff === "object" ? assignment.staff?._id : assignment.staff;
+      return [String(staffId), assignment.hourRate];
+    }));
+    const clientId = typeof job.client === "object" ? job.client?._id : job.client;
+    setJobDetails({
+      jobName: job.jobName,
+      description: job.description,
+      client: clientId || "",
+      assignedStaff: assignedStaffIds,
+      staffRates: Object.fromEntries(assignedStaffIds.map((staffId) => [
+        staffId,
+        staffRatesById[staffId] ?? job.staffHourRate ?? "",
+      ])),
+      orgNoOfhours: job.orgNoOfhours,
+      orgHourRate: job.orgHourRate,
+      estNoOfhours: job.estNoOfhours,
+      staffHourRate: job.staffHourRate,
+      notes: job.notes,
+    });
+  }, [jobQuery.data]);
 
   const handleUpdateJob = async (values) => {
     setIsLoading(true);
 
     try {
-      const response = await axios.put(environment.apiUrl + `/job/updatedJob/${id}`, values, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const responseData = response.data;
-      if (response.status === 200) {
-        setAlertSeverity('success');
-        setAlertMessage('Job updated successfully');
-        setTimeout(() => {
-          navigate('/jobs');
-        }, 2000);
-      } else {
-        setAlertSeverity('error');
-        setAlertMessage(`Failed to update job: ${responseData.message}`);
-      }
+      await updateJob.mutateAsync({ jobId: id, values });
+      setAlertSeverity('success');
+      setAlertMessage('Job updated successfully');
+      setTimeout(() => {
+        navigate('/jobs');
+      }, 2000);
     } catch (error) {
       setAlertSeverity('error');
       setAlertMessage(`Error updating job: ${error.message}`);

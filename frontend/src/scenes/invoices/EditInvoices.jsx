@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import React, { useEffect, useState } from 'react';
 import {
   Box,
@@ -11,13 +10,15 @@ import {
   Typography,
 } from '@mui/material';
 import MuiAlert from '@mui/material/Alert';
-import axios from 'axios';
 import { useNavigate, useParams } from "react-router-dom";
 import { Formik, Field, Form } from 'formik';
 import * as yup from 'yup';
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { formPageSx } from "../../styles/uiStyles";
+import { useActiveClients } from "../clients/clientQueries";
+import { useServiceMutation } from "../../queries/queryHelpers";
+import { invoiceService } from "../../services/invoiceService";
+import { useInvoice, invoiceQueryKeys } from "./invoiceQueries";
 
 // Validation schema
 const invoiceSchema = yup.object().shape({
@@ -31,8 +32,13 @@ const invoiceSchema = yup.object().shape({
 
 const EditInvoice = () => {
   const { id } = useParams();
-  const token = getAccessToken();
-
+  const invoiceQuery = useInvoice(id);
+  const clientsQuery = useActiveClients();
+  const clients = clientsQuery.data?.clients || [];
+  const updateInvoice = useServiceMutation(
+    ({ invoiceId, values }) => invoiceService.update(invoiceId, values),
+    { invalidate: [invoiceQueryKeys.all, invoiceQueryKeys.detail(id)] }
+  );
   const [invoiceDetails, setInvoiceDetails] = useState({
     invoiceTitle: "",
     invoiceDescription: "",
@@ -42,92 +48,34 @@ const EditInvoice = () => {
     notes: "",
   });
 
-  const [clients, setClients] = useState([]);
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [alertSeverity, setAlertSeverity] = useState('success');
   const [alertMessage, setAlertMessage] = useState('');
 
   useEffect(() => {
-    fetchClients();
-    fetchInvoiceDetails();
-  }, [id]);
-
-  const fetchClients = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + "/client/getAllActiveClient", {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      if (response.data.success) {
-        setClients(response.data.clients);
-      } else {
-        setAlertSeverity("error");
-        setAlertMessage("Failed to fetch clients");
-        setOpenSnackbar(true);
-      }
-    } catch (error) {
-      console.error("Error fetching clients:", error);
-      setAlertSeverity("error");
-      setAlertMessage("Failed to fetch clients");
-      setOpenSnackbar(true);
-    }
-  };
-
-  const fetchInvoiceDetails = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + `/invoice/getInvoiceById/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const responseData = response.data;
-      if (responseData.success) {
-        const invoice = responseData.invoice;
-        // Format the sendDate to YYYY-MM-DD for the input field
-        if (invoice.sendDate) {
-          invoice.sendDate = new Date(invoice.sendDate).toISOString().split('T')[0];
-        }
-        // Ensure client is set as client ID
-        setInvoiceDetails({ ...invoice, client: invoice.client._id, notes: invoice.notes || "" });
-      } else {
-        console.error('Failed to fetch invoice details:', responseData.message);
-      }
-    } catch (error) {
-      console.error('Error fetching invoice details:', error);
-    }
-  };
+    const invoice = invoiceQuery.data?.invoice;
+    if (!invoice) return;
+    const sendDate = invoice.sendDate
+      ? new Date(invoice.sendDate).toISOString().split('T')[0]
+      : "";
+    const clientId = typeof invoice.client === "object" ? invoice.client?._id : invoice.client;
+    setInvoiceDetails({ ...invoice, sendDate, client: clientId || "", notes: invoice.notes || "" });
+  }, [invoiceQuery.data]);
 
   const handleUpdateInvoice = async (values) => {
-    setIsLoading(true);
-
     try {
-      const response = await axios.put(environment.apiUrl + `/invoice/updatedInvoice/${id}`, values, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      if (response.status === 200) {
-        setInvoiceDetails(values);
-        setAlertSeverity('success');
-        setAlertMessage('Invoice updated successfully');
-        setTimeout(() => {
-          navigate('/invoices');
-        }, 2000);
-      } else {
-        setAlertSeverity('error');
-        setAlertMessage(`Failed to update invoice: ${response.data.message}`);
-      }
+      await updateInvoice.mutateAsync({ invoiceId: id, values });
+      setInvoiceDetails(values);
+      setAlertSeverity('success');
+      setAlertMessage('Invoice updated successfully');
+      setTimeout(() => {
+        navigate('/invoices');
+      }, 2000);
     } catch (error) {
       setAlertSeverity('error');
       setAlertMessage(`Error updating invoice: ${error.message}`);
     } finally {
-      setIsLoading(false);
       setOpenSnackbar(true);
     }
   };
@@ -217,7 +165,7 @@ const EditInvoice = () => {
                     variant="contained"
                     color="primary"
                     type="submit"
-                    disabled={isLoading}
+                    disabled={updateInvoice.isPending}
                     sx={{
                       backgroundColor: '#6870fa',
                       color: 'white',
@@ -228,7 +176,7 @@ const EditInvoice = () => {
                       },
                     }}
                   >
-                    {isLoading ? 'Updating...' : 'Update Invoice'}
+                    {updateInvoice.isPending ? 'Updating...' : 'Update Invoice'}
                   </Button>
                 </Grid>
               </Grid>

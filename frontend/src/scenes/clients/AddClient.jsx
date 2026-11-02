@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
   Box,
   Button,
@@ -13,53 +12,41 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { Formik } from "formik";
 import React, { useState } from "react";
 import * as yup from "yup";
-import axios from "axios";
 import Header from "../../components/Header";
-import { environment } from '../../environment';
 import { useNavigate } from "react-router";
 import { formPageSx } from "../../styles/uiStyles";
+import { useCreateClient } from "./clientQueries";
 
 const AddClient = ({ onClientAdded }) => {
   const isNonMobile = useMediaQuery("(min-width:600px)");
-  const [loading, setLoading] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
   const [alertSeverity, setAlertSeverity] = useState("success");
   const navigate = useNavigate();
+  const createClient = useCreateClient();
 
   const handleFormSubmit = async (values, { resetForm }) => {
-    setLoading(true);
     try {
-      const token = getAccessToken();
-      const headers = {
-        Authorization: `Bearer ${token}`,
-      };
+      const responseData = await createClient.mutateAsync(values);
 
-      const response = await axios.post(
-        environment.apiUrl+`/client/addClient`,
-        values,
-        { headers }
-      );
-
-      if (response.data.success) {
+      if (responseData.success) {
         setAlertSeverity("success");
         setAlertMessage("Client Added Successfully");
         resetForm();
         if (onClientAdded) {
-          onClientAdded(response.data.client);
+          onClientAdded(responseData.newClient);
         }
         navigate('/clients');
 
       } else {
         setAlertSeverity("error");
-        setAlertMessage(response.data.message);
+        setAlertMessage(responseData.message);
       }
     } catch (error) {
       console.error("Error creating client:", error);
       setAlertSeverity("error");
-      setAlertMessage("Failed to add client");
+      setAlertMessage(error.message || "Failed to add client");
     } finally {
-      setLoading(false);
       setOpenSnackbar(true);
     }
   };
@@ -274,7 +261,7 @@ const AddClient = ({ onClientAdded }) => {
               <Button
                 type="submit"
                 variant="contained"
-                disabled={loading}
+                disabled={createClient.isPending}
                 sx={{
                   backgroundColor: "#6870fa",
                   color: "white",
@@ -285,7 +272,7 @@ const AddClient = ({ onClientAdded }) => {
                   },
                 }}
               >
-                {loading ? "Adding..." : "Add"}
+                {createClient.isPending ? "Adding..." : "Add"}
               </Button>
             </Box>
           </form>

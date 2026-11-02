@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
   Box,
   Button,
@@ -14,63 +13,54 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { Formik } from "formik";
 import React, { useState } from "react";
 import * as yup from "yup";
-import axios from "axios";
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { useNavigate } from "react-router";
 import { Visibility, VisibilityOff } from "@mui/icons-material";
 import { formPageSx } from "../../styles/uiStyles";
+import { useServiceMutation } from "../../queries/queryHelpers";
+import { userService } from "../../services/userService";
 
 const CreateAdmin = ({ onStaffAdded }) => {
   const isNonMobile = useMediaQuery("(min-width:600px)");
-  const [loading, setLoading] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
   const [alertSeverity, setAlertSeverity] = useState("success");
   const [showPassword, setShowPassword] = useState(false);
   const navigate = useNavigate();
+  const createAdmin = useServiceMutation(userService.create, {
+    invalidate: [["admins"], ["staff"]],
+  });
 
   const handleClickShowPassword = () => setShowPassword(!showPassword);
   const handleMouseDownPassword = (event) => event.preventDefault();
 
   const handleFormSubmit = async (values, { resetForm }) => {
-    setLoading(true);
     try {
-      const token = getAccessToken();
-      const headers = {
-        Authorization: `Bearer ${token}`,
-      };
+      const response = await createAdmin.mutateAsync({
+        email: values.email,
+        password: values.password,
+        userName: values.userName,
+        role: "admin",
+        adminDetails: values,
+      });
 
-      const response = await axios.post(
-        environment.apiUrl + `/user/adduser`,
-        {
-          email: values.email,
-          password: values.password,
-          userName: values.userName,
-          role: "admin",
-          adminDetails: values,
-        },
-        { headers }
-      );
-
-      if (response.data.success) {
+      if (response.success) {
         setAlertSeverity("success");
         setAlertMessage("Admin Added Successfully");
         resetForm();
         if (onStaffAdded) {
-          onStaffAdded(response.data.staff);
+          onStaffAdded(response.staff);
         }
         navigate('/admin');
       } else {
         setAlertSeverity("error");
-        setAlertMessage(response.data.message);
+        setAlertMessage(response.message);
       }
     } catch (error) {
       console.error("Error creating Admin:", error);
       setAlertSeverity("error");
-      setAlertMessage("Failed to add admin");
+      setAlertMessage(error.message || "Failed to add admin");
     } finally {
-      setLoading(false);
       setOpenSnackbar(true);
     }
   };
@@ -231,7 +221,7 @@ const CreateAdmin = ({ onStaffAdded }) => {
               <Button
                 type="submit"
                 variant="contained"
-                disabled={loading}
+                disabled={createAdmin.isPending}
                 sx={{
                   backgroundColor: "#6870fa",
                   color: "white",
@@ -242,7 +232,7 @@ const CreateAdmin = ({ onStaffAdded }) => {
                   },
                 }}
               >
-                {loading ? "Adding..." : "Add"}
+                {createAdmin.isPending ? "Adding..." : "Add"}
               </Button>
             </Box>
           </form>

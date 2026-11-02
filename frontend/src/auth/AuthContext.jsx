@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import axios from "./apiClient";
-import { clearAccessToken, refreshSession, setAccessToken } from "./apiClient";
-import { environment } from "../environment";
+import { clearAccessToken, refreshSession, setAccessToken } from "../services/apiClient";
+import { authService } from "../services/authService";
+import { queryClient } from "../queryClient";
 
 const AuthContext = createContext(null);
 
@@ -19,6 +19,7 @@ export function AuthProvider({ children }) {
     const onExpired = () => {
       if (!mounted) return;
       clearAccessToken();
+      queryClient.clear();
       setUser(null);
       setStatus("unauthenticated");
     };
@@ -47,11 +48,9 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async (credentials) => {
-    const { data } = await axios.post(`${environment.apiUrl}/auth/login`, credentials, {
-      withCredentials: true,
-      _skipAuthRefresh: true,
-    });
+    const data = await authService.login(credentials);
     setAccessToken(data.accessToken);
+    queryClient.clear();
     setUser(data.user);
     setStatus("authenticated");
     return data.user;
@@ -59,12 +58,10 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     try {
-      await axios.post(`${environment.apiUrl}/auth/logout`, {}, {
-        withCredentials: true,
-        _skipAuthRefresh: true,
-      });
+      await authService.logout();
     } finally {
       clearAccessToken();
+      queryClient.clear();
       setUser(null);
       setStatus("unauthenticated");
     }

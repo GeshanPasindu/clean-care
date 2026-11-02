@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -22,10 +22,9 @@ import {
 } from "@mui/material";
 import PrintIcon from "@mui/icons-material/Print";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
-import axios from "axios";
-import { getAccessToken } from "../../auth/apiClient";
-import { environment } from "../../environment";
 import logo from "../../assets/logo/logo.png";
+import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
+import { jobService } from "../jobs/jobService";
 
 const paymentMethods = ["Cash", "Bank Transfer", "Card", "Cheque", "Other"];
 const PAYROLL_TIMEZONE_OFFSET_MS = 330 * 60 * 1000;
@@ -125,78 +124,65 @@ const StaffPayrollSection = ({ staffId, isStaffView, onSaved }) => {
   const [period, setPeriod] = useState({ startDate: "", endDate: "" });
   const [preview, setPreview] = useState({ entries: [], totalHours: 0, totalAmount: 0, payouts: [] });
   const [previewRange, setPreviewRange] = useState({ startDate: "", endDate: "" });
+  const [requestedPeriod, setRequestedPeriod] = useState(null);
   const [payment, setPayment] = useState({ paymentDate: localDateInput(), method: "Cash", referenceNumber: "" });
   const [selectedPayout, setSelectedPayout] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
-
-  const endpoint = useMemo(() => `${environment.apiUrl}/job/staffPayroll/${staffId || "self"}`, [staffId]);
-
-  const fetchPayroll = useCallback(async ({ useCurrentPeriod = false } = {}) => {
-    if (!staffId) return;
-    setLoading(true);
-    setErrorMessage("");
-    try {
-      const params = new URLSearchParams();
-      if (!useCurrentPeriod && period.startDate && period.endDate) {
-        params.set("startDate", period.startDate);
-        params.set("endDate", period.endDate);
-      }
-      const query = params.toString();
-      const response = await axios.get(`${endpoint}${query ? `?${query}` : ""}`, {
-        headers: { Authorization: `Bearer ${getAccessToken()}` },
-      });
-      const data = response.data;
-      setStaff(data.staff || { name: "Staff member", payFrequency: "Weekly" });
-      setPeriod({
-        startDate: String(data.period?.periodStart || "").slice(0, 10),
-        endDate: String(data.period?.periodEnd || "").slice(0, 10),
-      });
-      setPreviewRange({
-        startDate: String(data.period?.periodStart || "").slice(0, 10),
-        endDate: String(data.period?.periodEnd || "").slice(0, 10),
-      });
-      setPreview({
-        entries: data.entries || [],
-        totalHours: Number(data.totalHours || 0),
-        totalAmount: Number(data.totalAmount || 0),
-        payouts: data.payouts || [],
-      });
-    } catch (error) {
-      setErrorMessage(error.response?.data?.message || "Could not load payroll details.");
-    } finally {
-      setLoading(false);
-    }
-  }, [endpoint, period.endDate, period.startDate, staffId]);
+  const payrollQuery = useServiceQuery(
+    ["staff-payroll", staffId, requestedPeriod],
+    () => jobService.getStaffPayroll(staffId || "self", requestedPeriod || {}),
+    { enabled: Boolean(staffId) || isStaffView }
+  );
+  const recordPayroll = useServiceMutation(
+    ({ id, values }) => jobService.recordStaffPayroll(id || "self", values),
+    { invalidate: [["staff-payroll", staffId]] }
+  );
+  const loading = payrollQuery.isPending;
+  const saving = recordPayroll.isPending;
 
   useEffect(() => {
-    fetchPayroll({ useCurrentPeriod: true });
-    // The initial period comes from the employee's stored schedule.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staffId, endpoint]);
+    const data = payrollQuery.data;
+    if (!data) return;
+    setErrorMessage("");
+    setStaff(data.staff || { name: "Staff member", payFrequency: "Weekly" });
+    setPeriod({
+      startDate: String(data.period?.periodStart || "").slice(0, 10),
+      endDate: String(data.period?.periodEnd || "").slice(0, 10),
+    });
+    setPreviewRange({
+      startDate: String(data.period?.periodStart || "").slice(0, 10),
+      endDate: String(data.period?.periodEnd || "").slice(0, 10),
+    });
+    setPreview({
+      entries: data.entries || [],
+      totalHours: Number(data.totalHours || 0),
+      totalAmount: Number(data.totalAmount || 0),
+      payouts: data.payouts || [],
+    });
+  }, [payrollQuery.data]);
+
+  useEffect(() => {
+    if (payrollQuery.isError) {
+      setErrorMessage(payrollQuery.error?.message || "Could not load payroll details.");
+    }
+  }, [payrollQuery.error, payrollQuery.isError]);
 
   const handleRecordPayout = async () => {
-    setSaving(true);
     setErrorMessage("");
     setStatusMessage("");
     try {
-      const response = await axios.post(endpoint, {
-        periodStart: period.startDate,
-        periodEnd: period.endDate,
-        ...payment,
-      }, { headers: { Authorization: `Bearer ${getAccessToken()}` } });
-      setSelectedPayout(response.data.payout);
-      setStatusMessage(response.data.projectionSyncPending
+      const response = await recordPayroll.mutateAsync({
+        id: staffId || "self",
+        values: { periodStart: period.startDate, periodEnd: period.endDate, ...payment },
+      });
+      setSelectedPayout(response.payout);
+      setStatusMessage(response.projectionSyncPending
         ? "Receipt saved. Some job payment statuses could not be refreshed; reload the page to sync them."
         : "Payroll recorded. The receipt is ready to print.");
-      await fetchPayroll();
       onSaved?.();
     } catch (error) {
-      setErrorMessage(error.response?.data?.message || "Could not record payroll. Refresh the preview and try again.");
-    } finally {
-      setSaving(false);
+      setErrorMessage(error.message || "Could not record payroll. Refresh the preview and try again.");
     }
   };
 
@@ -234,7 +220,7 @@ const StaffPayrollSection = ({ staffId, isStaffView, onSaved }) => {
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" }, gap: 1.5, mb: 2 }}>
           <TextField label="Period from" type="date" value={period.startDate} onChange={(event) => setPeriod((current) => ({ ...current, startDate: event.target.value }))} InputLabelProps={{ shrink: true }} />
           <TextField label="Period to" type="date" value={period.endDate} onChange={(event) => setPeriod((current) => ({ ...current, endDate: event.target.value }))} InputLabelProps={{ shrink: true }} />
-          <Button variant="outlined" onClick={() => fetchPayroll()} disabled={loading || !period.startDate || !period.endDate}>
+          <Button variant="outlined" onClick={() => setRequestedPeriod({ startDate: period.startDate, endDate: period.endDate })} disabled={loading || !period.startDate || !period.endDate}>
             {loading ? "Loading…" : "Preview period"}
           </Button>
           {!isStaffView && (

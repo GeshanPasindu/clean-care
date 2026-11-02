@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
     Box,
     Button,
@@ -16,88 +15,32 @@ import {
   import AlertTitle from "@mui/material/AlertTitle";
   import useMediaQuery from "@mui/material/useMediaQuery";
   import { Formik } from "formik";
-  import React, { useState, useEffect } from "react";
+  import React, { useState } from "react";
   import { useNavigate } from "react-router-dom";
   import * as yup from "yup";
-  import axios from "axios";
   import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { formPageSx } from "../../styles/uiStyles";
+  import { useActiveClients } from "../clients/clientQueries";
+  import { useActiveStaff } from "../staff/staffQueries";
+  import { useServiceMutation } from "../../queries/queryHelpers";
+  import { jobService } from "./jobService";
   
   const AddJob = () => {
     const isNonMobile = useMediaQuery("(min-width:600px)");
-    const [loading, setLoading] = useState(false);
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [alertMessage, setAlertMessage] = useState("");
     const [alertSeverity, setAlertSeverity] = useState("success");
-    const [clients, setClients] = useState([]);
-    const [staffs, setStaffs] = useState([]);
+    const { data: clientsResponse } = useActiveClients();
+    const { data: staffsResponse } = useActiveStaff();
+    const clients = clientsResponse?.clients || [];
+    const staffs = staffsResponse?.staffs || [];
+    const createJob = useServiceMutation(jobService.create, { invalidate: [["jobs"]] });
     const navigate = useNavigate();
   
-    useEffect(() => {
-      fetchClients();
-      fetchStaffs();
-    }, []);
-    const token = getAccessToken()
-
-    const fetchClients = async () => {
-        try {
-          const headers = {
-            Authorization: `Bearer ${token}`
-          };
-      
-          const response = await axios.get(environment.apiUrl + "/client/getAllActiveClient", { headers });
-      
-          if (response.data.success) {
-            setClients(response.data.clients);
-          } else {
-            setAlertSeverity("error");
-            setAlertMessage("Failed to fetch clients");
-            setOpenSnackbar(true);
-          }
-        } catch (error) {
-          console.error("Error fetching clients:", error);
-          setAlertSeverity("error");
-          setAlertMessage("Failed to fetch clients");
-          setOpenSnackbar(true);
-        }
-      };
-  
-    const fetchStaffs = async () => {
-        try {
-          // The shared API client attaches the in-memory access token.
-          const response = await axios.get(environment.apiUrl + "/staff/getAllActiveStaff", {
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          });
-          if (response.data.success) {
-            console.log(staffs);
-            setStaffs(response.data.staffs);
-          } else {
-            setAlertSeverity("error");
-            setAlertMessage("Failed to fetch staffs");
-            setOpenSnackbar(true);
-          }
-        } catch (error) {
-          console.error("Error fetching staffs:", error);
-          setAlertSeverity("error");
-          setAlertMessage("Failed to fetch staffs");
-          setOpenSnackbar(true);
-        }
-      };
-  
       const handleFormSubmit = async (values, { resetForm }) => {
-        setLoading(true);
         try {
-          const headers = {
-            Authorization: `Bearer ${token}`
-          };
-      
-          const response = await axios.post(environment.apiUrl + `/job/addJob`, values, { headers });
-          console.log("Response:", response.data);
-      
-          if (response.data.success== true) {
+          const response = await createJob.mutateAsync(values);
+          if (response.success === true) {
             setAlertSeverity("success");
             setAlertMessage("Job Added Successfully");
             setTimeout(() => {
@@ -106,14 +49,13 @@ import { formPageSx } from "../../styles/uiStyles";
             resetForm();
           } else {
             setAlertSeverity("error");
-            setAlertMessage(response.data.result.message);
+            setAlertMessage(response.message || "Failed to add job");
           }
         } catch (error) {
           console.error("Error creating job:", error);
           setAlertSeverity("error");
-          setAlertMessage("Failed to add job");
+          setAlertMessage(error.message || "Failed to add job");
         } finally {
-          setLoading(false);
           setOpenSnackbar(true);
         }
       };
@@ -400,7 +342,7 @@ import { formPageSx } from "../../styles/uiStyles";
                 <Button
                   type="submit"
                   variant="contained"
-                  disabled={loading}
+                  disabled={createJob.isPending}
                   sx={{
                     backgroundColor: "#6870fa",
                     color: "white",
@@ -411,7 +353,7 @@ import { formPageSx } from "../../styles/uiStyles";
                     },
                   }}
                 >
-                  {loading ? "Adding..." : "Add"}
+                  {createJob.isPending ? "Adding..." : "Add"}
                 </Button>
               </Box>
             </form>

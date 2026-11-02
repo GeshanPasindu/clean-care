@@ -5,43 +5,21 @@ import { Box, Button, IconButton, Tooltip } from "@mui/material";
 import { DataGrid, GridToolbar } from "@mui/x-data-grid";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import Header from "../../../components/Header";
-import { environment } from "../../../environment.js";
 import { pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../../styles/uiStyles";
+import { useServiceQuery } from "../../../queries/queryHelpers";
+import { jobService } from "../jobService";
 
 const CompletedJobs = () => {
-  const [data, setData] = useState([]);
-
-  const fetchCompletedJobs = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + "/job/getAllCompletedJobs");
-
-      const responseData = response.data;
-      console.log("sss", response);
-      if (responseData.success) {
-        const modifiedData = responseData.jobs.map((item) => ({
-          ...item,
-          startTime: item.startTime ? item.startTime.split("T")[0] : "N/A",
-          id: item._id, // Set id for DataGrid row key
-        }));
-
-        modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-        setData(modifiedData);
-      } else {
-        console.error("Failed to fetch completed jobs:", responseData.message);
-      }
-    } catch (error) {
-      console.error("Error fetching completed jobs:", error);
-    }
-  };
-
-  useEffect(() => {
-    fetchCompletedJobs();
-  }, []);
+  const { data: responseData, isPending } = useServiceQuery(
+    ["jobs", "completed"],
+    jobService.getAllCompleted
+  );
+  const data = (responseData?.jobs || [])
+    .map((item) => ({ ...item, startTime: item.startTime ? item.startTime.split("T")[0] : "N/A", id: item._id }))
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
   const exportToPdf = () => {
     const doc = new jsPDF();
@@ -122,7 +100,7 @@ const CompletedJobs = () => {
         </Button>
       </Box> */}
       <Box sx={tableSurfaceSx}>
-        <DataGrid rows={data} columns={columns} components={{ Toolbar: GridToolbar }} />
+        <DataGrid rows={data} columns={columns} loading={isPending} components={{ Toolbar: GridToolbar }} />
       </Box>
     </Box>
   );

@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import React, { useEffect, useState } from 'react';
 import {
   Box,
@@ -12,13 +11,14 @@ import {
 } from '@mui/material';
 import { Visibility, VisibilityOff } from "@mui/icons-material";
 import MuiAlert from '@mui/material/Alert';
-import axios from 'axios';
 import { useNavigate, useParams } from "react-router-dom";
 import { Formik, Field, Form } from 'formik';
 import * as yup from 'yup';
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { formPageSx } from "../../styles/uiStyles";
+import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
+import { adminService } from "../../services/adminService";
+import { userService } from "../../services/userService";
 
 // Validation schema
 const adminSchema = yup.object().shape({
@@ -31,7 +31,6 @@ const adminSchema = yup.object().shape({
 
 const EditAdmin = () => {
   const { id } = useParams();
-  const token = getAccessToken();
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -53,42 +52,36 @@ const EditAdmin = () => {
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [admin, setAdmin] = useState('');
   const navigate = useNavigate();
-  const [isLoading, setIsLoading] = useState(false);
   const [openSnackbar, setOpenSnackbar] = useState(false);
   const [alertSeverity, setAlertSeverity] = useState('success');
   const [alertMessage, setAlertMessage] = useState('');
   const adminName = [adminDetails.firstName, adminDetails.lastName].filter(Boolean).join(" ") || adminDetails.userName;
+  const adminQuery = useServiceQuery(
+    ["users", "detail", id],
+    () => userService.getById(id),
+    { enabled: Boolean(id) }
+  );
+  const updateAdminMutation = useServiceMutation(
+    ({ adminId, values }) => userService.updateAdmin(adminId, values),
+    { invalidate: [["admins"], ["users", "detail", id]] }
+  );
+  const updatePasswordMutation = useServiceMutation(
+    ({ userId, password }) => adminService.updatePassword(userId, password)
+  );
 
   useEffect(() => {
-    fetchAdminDetails();
-  }, [id]);
-
-  const fetchAdminDetails = async () => {
-    try {
-      const response = await axios.get(`${environment.apiUrl}/user/getUser/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const responseData = response.data.userDetails;
-      if (responseData) {
-        const adminData = responseData.adminDetails;
-        setAdmin(adminData._id);
-        setAdminDetails({
-          firstName: adminData.firstName,
-          lastName: adminData.lastName,
-          email: responseData.email,
-          position: adminData.position,
-          userName: responseData.userName,
-        });
-      } else {
-        console.error('Failed to fetch admin details:', responseData.message);
-      }
-    } catch (error) {
-      console.error('Error fetching admin details:', error);
-    }
-  };
+    const userData = adminQuery.data?.userDetails;
+    if (!userData?.adminDetails) return;
+    const adminData = userData.adminDetails;
+    setAdmin(adminData._id);
+    setAdminDetails({
+      firstName: adminData.firstName || "",
+      lastName: adminData.lastName || "",
+      email: userData.email || "",
+      position: adminData.position || "",
+      userName: userData.userName || "",
+    });
+  }, [adminQuery.data]);
 
   const handlePasswordChange = (e) => {
     const { name, value } = e.target;
@@ -126,32 +119,19 @@ const EditAdmin = () => {
   };
 
   const handleUpdateAdmin = async (values) => {
-    setIsLoading(true);
-
     try {
-      const response = await axios.put(`${environment.apiUrl}/user/updateAdmin/${admin}`, values, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      if (response.status === 200) {
-        setAdminDetails(values);
-        setAlertSeverity('success');
-        setAlertMessage('Admin account updated successfully');
-        setTimeout(() => {
-          navigate('/admin');
-        }, 2000);
-      } else {
-        console.error(response);
-        setAlertSeverity('error');
-        setAlertMessage(`Failed to update admin: ${response.data.message}`);
-      }
+      await updateAdminMutation.mutateAsync({ adminId: admin, values });
+      setAdminDetails(values);
+      setAlertSeverity('success');
+      setAlertMessage('Admin account updated successfully');
+      setTimeout(() => {
+        navigate('/admin');
+      }, 2000);
     } catch (error) {
       console.error('Error updating admin:', error);
       setAlertSeverity('error');
       setAlertMessage(`Error updating admin: ${error.message}`);
     } finally {
-      setIsLoading(false);
       setOpenSnackbar(true);
     }
   };
@@ -178,20 +158,11 @@ const EditAdmin = () => {
     }
 
     try {
-      const response = await axios.put(`${environment.apiUrl}/admin/updateAdminPassword/${id}`, { password: passwordDetails.password }, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      if (response.status === 200) {
-        setAlertMessage('Password updated successfully');
-        setTimeout(() => {
-          navigate('/admin');
-        }, 2000);
-      } else {
-        setAlertSeverity('error');
-        setAlertMessage(`Failed to update password: ${response.data.message}`);
-      }
+      await updatePasswordMutation.mutateAsync({ userId: id, password: passwordDetails.password });
+      setAlertMessage('Password updated successfully');
+      setTimeout(() => {
+        navigate('/admin');
+      }, 2000);
     } catch (error) {
       console.error('Error updating password:', error);
       setAlertSeverity('error');
@@ -242,7 +213,7 @@ const EditAdmin = () => {
                     variant="contained"
                     color="primary"
                     type="submit"
-                    disabled={isLoading}
+                    disabled={updateAdminMutation.isPending}
                     sx={{
                       backgroundColor: '#6870fa',
                       color: 'white',

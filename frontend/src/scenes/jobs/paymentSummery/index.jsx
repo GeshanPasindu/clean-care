@@ -1,244 +1,89 @@
-import { getAccessToken } from "../../../auth/apiClient";
-import {
-    Delete as DeleteIcon,
-    Visibility as VisibilityIcon,
-  } from "@mui/icons-material";
-  import EditIcon from "@mui/icons-material/Edit";
-  import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
-  import {
-    Box,
-    Button,
-    IconButton,
-    Tooltip,
-    Select,
-    MenuItem,
-    Typography,
-    TextField,
-  } from "@mui/material";
-  import { DataGrid, GridToolbar } from "@mui/x-data-grid";
-  import jsPDF from "jspdf";
-  import "jspdf-autotable";
-  import React, { useEffect, useRef, useState } from "react";
-  import { Link } from "react-router-dom";
-  import Swal from "sweetalert2";
-  import axios from "axios";
-  import Header from "../../../components/Header";
+import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
+import { Alert, Box, Button, MenuItem, Select, TextField, Typography } from "@mui/material";
+import { DataGrid, GridToolbar } from "@mui/x-data-grid";
+import React, { useState } from "react";
+import Swal from "sweetalert2";
+import Header from "../../../components/Header";
 import { useAuth } from "../../../auth/AuthContext";
-  import { environment } from "../../../environment.js";
-  import { filterBarSx, pageContainerSx, pageHeaderRowSx, surfaceSx, tableSurfaceSx } from "../../../styles/uiStyles";
-  import PaymentReceiptDialog from "./PaymentReceiptDialog";
+import { useServiceMutation, useServiceQuery } from "../../../queries/queryHelpers";
+import { useClients } from "../../clients/clientQueries";
+import { useStaff } from "../../staff/staffQueries";
+import { filterBarSx, pageContainerSx, pageHeaderRowSx, surfaceSx, tableSurfaceSx } from "../../../styles/uiStyles";
+import { jobService } from "../jobService";
+import PaymentReceiptDialog from "./PaymentReceiptDialog";
 
 
   const Jobs = () => {
     const { user } = useAuth();
-    const [data, setData] = useState([]);
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
-    const [staff, setStaff] = useState([]);
-    const [clients, setClients] = useState([]);
     const [selectedStaff, setSelectedStaff] = useState("");
     const [selectedClient, setSelectedClient] = useState("");
-    const token = getAccessToken();
-    const fetchAllRef = useRef(false);
-
-    const [totalPayment, setTotalPayment] = useState(0);
-    const [staffPayment, setStaffPayment] = useState(0);
-    const [receivedPayment, setReceivedPayment] = useState(0);
-    const [profit, setProfit] = useState(0);
+    const [filters, setFilters] = useState({});
     const [selectedJob, setSelectedJob] = useState(null);
-    
-    
-  
+
     const userRole = user?.role;
-    const shouldShowButton = userRole !== "staff";
-    const userStaff = userRole ==='staff'
-  
-    const userId = user?.id;
+    const shouldShowButton = Boolean(userRole && userRole !== "staff");
+    const userStaff = userRole === "staff";
+
     const formatTime = (dateTime) => {
       if (!dateTime) return null;
-      const time = new Date(dateTime);
-      return time.toLocaleTimeString("en-CA", { day:'2-digit',month:'2-digit',year:'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',hour12: false, });
+      return new Date(dateTime).toLocaleTimeString("en-CA", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
     };
-  
-    // const fetchJobs = async () => {
-    //   try {
-    //     let response;
-    //     if (userRole === "staff") {
-    //       response = await axios.get(environment.apiUrl + `/job/getJobsbyStaff/${userId}`);
-    //     } else {
-    //       response = await axios.get(environment.apiUrl + "/job/getAllJobs");
-    //     }
-  
-    //     const responseData = response.data;
-    //     if (responseData.success) {
-          
-    //       const modifiedData = responseData.jobs.map((item) => ({
-    //         ...item,
-    //         startTime: item.startTime.split("T")[0],
-    //         signInTime:formatTime(item.signInTime),
-    //         signOffTime:formatTime(item.signOffTime),
-    //         id: item._id, // Set id for DataGrid row key
-    //       }));
-  
-    //       modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  
-    //       setData(modifiedData);
-    //     } else {
-    //       console.error("Failed to fetch jobs:", responseData.message);
-    //     }
-    //   } catch (error) {
-    //     console.error("Error fetching jobs:", error);
-    //   }
-    // };
 
-    const fetchJobs = async () => {
-        try {
-          if (fetchAllRef.current) { }
-          let url;
-          if (userRole === "staff") {
-            url = environment.apiUrl + `/job/getJobsbyStaff/${userId}`;
-          } else {
-            url = environment.apiUrl + "/job/getAllJobs";
-          }
-    
-          let params = new URLSearchParams();
-          if (startDate) params.append("startDate", startDate);
-          if (endDate) params.append("endDate", endDate);
-          if (selectedStaff) params.append("staffId", selectedStaff);
-          if (selectedClient) params.append("clientId", selectedClient);
-    
-          if (fetchAllRef.current) {
-            params.delete('startDate');
-            params.delete("endDate");
-            params.delete("staffId");
-            params.delete("clientId");
-          }
-    
-          const response = await axios.get(url, { params });
-          const responseData = response.data;
-          console.log(responseData)
-          if (responseData.success) {
-            fetchAllRef.current = false;
-            const modifiedData = responseData.jobs.map((item) => ({
-              ...item,
-              id: item._id,
-              jobDate: formatTime(item.jobDate)
-            }));
-    
-            modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-            setData(modifiedData);
-            calculateSummary(modifiedData);
-          } else {
-            fetchAllRef.current = false;
-            console.error("Failed to fetch jobs:", responseData.message);
-          }
-        } catch (error) {
-          fetchAllRef.current = false;
-          console.error("Error fetching jobs:", error);
-          if (error.response.data.message === 'Jobs not found') {
-            setData([])
-            calculateSummary([]);
-          }
-        }
-      };
+    const jobsQuery = useServiceQuery(
+      ["jobs", "payment-summary", userRole, user?.id, filters],
+      () => userStaff
+        ? jobService.getByStaff(user?.id || "self", filters)
+        : jobService.getAllJobs(filters),
+      { enabled: Boolean(userRole) }
+    );
+    const staffQuery = useStaff({ enabled: shouldShowButton });
+    const clientsQuery = useClients({ enabled: shouldShowButton });
+    const updateJobStatus = useServiceMutation(
+      ({ id, status }) => jobService.updateStatus(id, { jobStatus: status }),
+      { invalidate: [["jobs"]] }
+    );
+    const deleteJob = useServiceMutation(jobService.remove, { invalidate: [["jobs"]] });
 
-    const calculateSummary = (jobs) => {
-        const totalPayment = jobs.reduce((acc, job) => acc + (job.orgTotal || 0), 0);
-        const receivedPayment = jobs.reduce((acc, job) => acc + (job.receivedPayments || []).reduce((sum, payment) => sum + Number(payment.amount || 0), 0), 0);
-        const staffPayment = jobs.reduce((acc, job) => acc + (job.staffPayTotal || 0), 0);
-        const profit = totalPayment - staffPayment;
-        setTotalPayment(totalPayment);
-        setReceivedPayment(receivedPayment);
-        setStaffPayment(staffPayment);
-        setProfit(profit);
-      };
+    const staff = (staffQuery.data?.staffs || []).map((item) => ({ ...item, id: item._id }));
+    const clients = (clientsQuery.data?.clients || []).map((item) => ({ ...item, id: item._id }));
+    const data = (jobsQuery.data?.jobs || []).map((item) => ({
+      ...item,
+      id: item._id,
+      jobDate: formatTime(item.jobDate),
+    }));
+    const totalPayment = data.reduce((sum, job) => sum + Number(job.orgTotal || 0), 0);
+    const receivedPayment = data.reduce(
+      (sum, job) => sum + (job.receivedPayments || []).reduce((paymentSum, payment) => paymentSum + Number(payment.amount || 0), 0),
+      0
+    );
+    const staffPayment = data.reduce((sum, job) => sum + Number(job.staffPayTotal || 0), 0);
+    const profit = totalPayment - staffPayment;
 
     const handlePaymentSaved = (updatedJob) => {
       setSelectedJob(updatedJob);
-      const updatedRows = data.map((row) => row.id === String(updatedJob._id)
-        ? { ...row, receivedPayments: updatedJob.receivedPayments }
-        : row);
-      setData(updatedRows);
-      calculateSummary(updatedRows);
     };
-    const fetchStaffAndClients = async () => {
-      try {
-        const headers = {
-          Authorization: `Bearer ${token}`
-        };
-    
-        const [staffResponse, clientResponse] = await Promise.all([
-          axios.get(`${environment.apiUrl}/staff/getAllStaff`, { headers }),
-          axios.get(`${environment.apiUrl}/client/getAllClient`, { headers })
-        ]);
-    
-        const staffData = staffResponse.data.staffs.map((item) => ({
-          ...item,
-          id: item._id
-        }));
-        const clientData = clientResponse.data.clients.map((item) => ({
-          ...item,
-          id: item._id
-        }));
-    
-        setStaff(staffData);
-        setClients(clientData);
-      } catch (error) {
-        console.error("Error fetching staff or clients:", error);
-      }
-    };
-    
-  
-  
-    useEffect(() => {
-      fetchJobs();
-      if(shouldShowButton){
-        fetchStaffAndClients();
 
-      }
-      
-    }, []);
-  
-    const exportToPdf = () => {
-      const doc = new jsPDF();
-      doc.autoTable({
-        head: [["Job ID", "Job Name", "Client", "Assigned Staff", "Start Time"]],
-        body: data.map(({ _id, jobName, client, assignedStaff, startTime }) => [
-          _id,
-          jobName,
-          `${client.firstName} ${client.lastName} `,
-          (Array.isArray(assignedStaff) ? assignedStaff : [assignedStaff])
-            .map((staff) => `${staff?.firstName || ""} ${staff?.lastName || ""}`.trim())
-            .filter(Boolean)
-            .join(", "),
-          startTime,
-        ]),
-      });
-      doc.save("jobs_data.pdf");
-    };
-  
     const handleStatusChange = async (id, newStatus) => {
       try {
-        const response = await axios.patch(
-          environment.apiUrl + `/job/updateStatus/${id}`,
-          { jobStatus: newStatus }
-        );
-        if (response.data.success) {
-          setData((prevData) =>
-            prevData.map((item) =>
-              item.id === id ? { ...item, jobStatus: newStatus } : item
-            )
-          );
-          Swal.fire("Updated!", "Job status has been updated.", "success");
-        } else {
-          throw new Error(response.data.message);
-        }
+        const response = await updateJobStatus.mutateAsync({ id, status: newStatus });
+        if (!response.success) throw new Error(response.message || "Job status update failed");
+        Swal.fire("Updated!", "Job status has been updated.", "success");
       } catch (error) {
         console.error("Error updating job status:", error);
         Swal.fire("Error!", "Failed to update job status. Please try again later.", "error");
       }
     };
-  
+
     const handleDeleteClick = (id) => {
       Swal.fire({
         title: "Are you sure?",
@@ -250,42 +95,33 @@ import { useAuth } from "../../../auth/AuthContext";
         confirmButtonText: "Delete",
       }).then((result) => {
         if (result.isConfirmed) {
-          axios
-            .delete(environment.apiUrl + `/job/deleteJobById/${id}`)
-            .then((response) => {
-              if (response.status !== 200) {
-                throw new Error("Failed to delete job");
-              }
-  
-              setData(data.filter((item) => item.id !== id));
-              Swal.fire("Deleted!", "The job has been deleted.", "success");
-              calculateSummary(data.filter((item) => item.id !== id));
-
-            })
-            .catch((error) => {
+          deleteJob.mutate(id, {
+            onSuccess: () => Swal.fire("Deleted!", "The job has been deleted.", "success"),
+            onError: (error) => {
               console.error("Error deleting job:", error);
               Swal.fire("Error!", "Failed to delete job. Please try again later.", "error");
-            });
+            },
+          });
         }
       });
     };
-  
-    const handleEditClick = (id) => { };
 
     const handleViewJobs = () => {
-      fetchJobs();
+      setFilters({
+        ...(startDate ? { startDate } : {}),
+        ...(endDate ? { endDate } : {}),
+        ...(selectedStaff ? { staffId: selectedStaff } : {}),
+        ...(selectedClient ? { clientId: selectedClient } : {}),
+      });
     };
 
-    const vievAlljobs = () =>{
-      fetchAllRef.current = true;
-      setEndDate('');
-      setStartDate('');
-      setSelectedClient('')
-      setSelectedStaff('');
-      fetchJobs();
-    }
-    
-    
+    const vievAlljobs = () => {
+      setEndDate("");
+      setStartDate("");
+      setSelectedClient("");
+      setSelectedStaff("");
+      setFilters({});
+    };
   let columns =[]
      columns = [
       { field: "id", headerName: "Job ID",hide: true },
@@ -517,11 +353,13 @@ import { useAuth } from "../../../auth/AuthContext";
             <Typography variant="h3">LKR {profit.toFixed(2)}</Typography>
           </Box>
         </Box>
+        {jobsQuery.isError && <Alert severity="error" sx={{ mb: 2 }}>{jobsQuery.error.message || "Could not load payment summary."}</Alert>}
         <Box sx={tableSurfaceSx}>
           <DataGrid
             rows={data}
             columns={columns}
             components={{ Toolbar: GridToolbar }}
+            loading={jobsQuery.isPending}
           />
         </Box>
         <PaymentReceiptDialog

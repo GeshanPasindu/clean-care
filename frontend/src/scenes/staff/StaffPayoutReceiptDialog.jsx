@@ -13,10 +13,9 @@ import {
   Typography,
 } from "@mui/material";
 import PrintIcon from "@mui/icons-material/Print";
-import axios from "axios";
-import { getAccessToken } from "../../auth/apiClient";
-import { environment } from "../../environment";
 import logo from "../../assets/logo/logo.png";
+import { useServiceMutation } from "../../queries/queryHelpers";
+import { jobService } from "../jobs/jobService";
 
 const paymentMethods = ["Cash", "Bank Transfer", "Card", "Cheque", "Other"];
 
@@ -92,7 +91,10 @@ const StaffPayoutReceiptDocument = ({ job, assignment, staffName, receipt, draft
 );
 
 const StaffPayoutReceiptDialog = ({ open, job, assignment, staffName, canRecord, onClose, onPaymentSaved }) => {
-  const token = getAccessToken();
+  const recordPayout = useServiceMutation(
+    ({ jobId, staffId, values }) => jobService.recordStaffPayout(jobId, staffId, values),
+    { invalidate: [["jobs"], ["staff-jobs"]] }
+  );
   const receipts = assignment?.payoutReceipts || [];
   const amountDue = Number(assignment?.payment || 0);
   const paidTotal = useMemo(
@@ -103,7 +105,7 @@ const StaffPayoutReceiptDialog = ({ open, job, assignment, staffName, canRecord,
   const balance = legacyPaid ? 0 : Math.max(0, amountDue - paidTotal);
   const [values, setValues] = useState({ amount: "", paymentDate: todayInputDate(), method: "Cash", referenceNumber: "" });
   const [selectedReceipt, setSelectedReceipt] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const saving = recordPayout.isPending;
   const [errorMessage, setErrorMessage] = useState("");
 
   useEffect(() => {
@@ -133,26 +135,23 @@ const StaffPayoutReceiptDialog = ({ open, job, assignment, staffName, canRecord,
       setErrorMessage("The staff assignment could not be identified.");
       return;
     }
-    setSaving(true);
     setErrorMessage("");
     try {
-      const response = await axios.post(
-        `${environment.apiUrl}/job/${job._id}/staff/${staffId}/payoutReceipts`,
-        { ...values, legacyReceiptOnly: legacyPaid },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const response = await recordPayout.mutateAsync({
+        jobId: job._id,
+        staffId,
+        values: { ...values, legacyReceiptOnly: legacyPaid },
+      });
       const updatedAssignment = {
         ...assignment,
-        paymentStatus: response.data.paymentStatus,
-        payoutReceipts: [...receipts, response.data.receipt],
+        paymentStatus: response.paymentStatus,
+        payoutReceipts: [...receipts, response.receipt],
       };
-      setSelectedReceipt(response.data.receipt);
+      setSelectedReceipt(response.receipt);
       setValues((current) => ({ ...current, amount: "" }));
       onPaymentSaved?.({ ...job, staffAssignment: updatedAssignment });
     } catch (error) {
-      setErrorMessage(error.response?.data?.message || "Could not record this payout. Please try again.");
-    } finally {
-      setSaving(false);
+      setErrorMessage(error.message || "Could not record this payout. Please try again.");
     }
   };
 

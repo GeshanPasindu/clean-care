@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
     Box,
     Button,
@@ -18,69 +17,54 @@ import {
   import AlertTitle from "@mui/material/AlertTitle";
   import useMediaQuery from "@mui/material/useMediaQuery";
   import { Formik } from "formik";
-  import React, { useEffect, useState } from "react";
+  import React, { useState } from "react";
   import * as yup from "yup";
-  import axios from "axios";
   import Header from "../../components/Header";
-  import { environment } from "../../environment";
   import { useNavigate } from "react-router-dom";
   import { formPageSx } from "../../styles/uiStyles";
   import { useAuth } from "../../auth/AuthContext";
+  import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
+  import { adminService } from "../../services/adminService";
+  import { userService } from "../../services/userService";
 
   const AddStaff = ({ onStaffAdded }) => {
     const isNonMobile = useMediaQuery("(min-width:600px)");
-    const [loading, setLoading] = useState(false);
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [alertMessage, setAlertMessage] = useState("");
     const [alertSeverity, setAlertSeverity] = useState("success");
     const [showPassword, setShowPassword] = useState(false); // State to manage password visibility
-    const [admins, setAdmins] = useState([]);
-    const [adminLoadError, setAdminLoadError] = useState("");
     const { user } = useAuth();
     const isSuperAdmin = user?.role === "superAdmin";
     const navigate = useNavigate();
-
-    useEffect(() => {
-      if (!isSuperAdmin) return undefined;
-      let active = true;
-      axios.get(`${environment.apiUrl}/admin/getAllAdmins`, {
-        headers: { Authorization: `Bearer ${getAccessToken()}` },
-      }).then(({ data }) => {
-        if (!active) return;
-        const activeAdmins = (data.admins || []).filter((admin) => admin.status === "active" && admin.adminDetails?._id);
-        setAdmins(activeAdmins);
-        if (!activeAdmins.length) setAdminLoadError("Create an active admin account before adding staff.");
-      }).catch(() => {
-        if (active) setAdminLoadError("Could not load admin supervisors.");
-      });
-      return () => { active = false; };
-    }, [isSuperAdmin]);
+    const adminsQuery = useServiceQuery(["admins", "list"], adminService.getAll, {
+      enabled: isSuperAdmin,
+    });
+    const admins = (adminsQuery.data?.admins || []).filter(
+      (admin) => admin.status === "active" && admin.adminDetails?._id
+    );
+    const adminLoadError = adminsQuery.isError
+      ? "Could not load admin supervisors."
+      : adminsQuery.isSuccess && !admins.length
+        ? "Create an active admin account before adding staff."
+        : "";
+    const createStaff = useServiceMutation(userService.create, {
+      invalidate: [["staff"], ["admins"]],
+    });
 
   
     const handleFormSubmit = async (values, { resetForm }) => {
-      setLoading(true);
       try {
-        const token = getAccessToken();
-        const headers = {
-          Authorization: `Bearer ${token}`,
-        };
-  
-        const response = await axios.post(
-          environment.apiUrl+ `/user/adduser`,
-          {
-            email: values.email,
-            password: values.password,
-            userName: values.userName,
-            role: "staff",
-            staffDetails: {
-              ...values,
-              ...(!isSuperAdmin ? { supervisorId: undefined } : {}),
-            }
+        const response = await createStaff.mutateAsync({
+          email: values.email,
+          password: values.password,
+          userName: values.userName,
+          role: "staff",
+          staffDetails: {
+            ...values,
+            ...(!isSuperAdmin ? { supervisorId: undefined } : {}),
           },
-          { headers }
-        );
-        console.log(response);
-        if (response.data.success) {
+        });
+        if (response.success) {
           setAlertSeverity("success");
           setAlertMessage("Staff Added Successfully");
           setTimeout(() => {
@@ -88,18 +72,17 @@ import {
           }, 2000);
           resetForm();
           if (onStaffAdded) {
-            onStaffAdded(response.data.staff);
+            onStaffAdded(response.staff);
           }
         } else {
           setAlertSeverity("error");
-          setAlertMessage(response.data.message);
+          setAlertMessage(response.message);
         }
       } catch (error) {
         console.error("Error creating staff:", error);
         setAlertSeverity("error");
-        setAlertMessage("Failed to add staff");
+        setAlertMessage(error.message || "Failed to add staff");
       } finally {
-        setLoading(false);
         setOpenSnackbar(true);
       }
     };
@@ -479,7 +462,7 @@ import {
                 <Button
                   type="submit"
                   variant="contained"
-                  disabled={loading}
+                  disabled={createStaff.isPending}
                   sx={{
                     backgroundColor: "#6870fa",
                     color: "white",
@@ -490,7 +473,7 @@ import {
                     },
                   }}
                 >
-                  {loading ? "Adding..." : "Add"}
+                  {createStaff.isPending ? "Adding..." : "Add"}
                 </Button>
               </Box>
             </form>

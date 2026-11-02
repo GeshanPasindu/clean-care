@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
     Delete as DeleteIcon,
     Visibility as VisibilityIcon,
@@ -8,52 +7,26 @@ import {
   import { DataGrid, GridToolbar } from "@mui/x-data-grid";
   import jsPDF from "jspdf";
   import "jspdf-autotable";
-  import React, { useEffect, useState } from "react";
+  import React from "react";
   import { Link } from "react-router-dom";
   import Swal from "sweetalert2";
-  import axios from "axios";
   import Header from "../../components/Header";
-  import { environment } from "../../environment";
+  import {
+    useClients,
+    useDeleteClient,
+    useUpdateClientStatus,
+  } from "./clientQueries";
   import { actionButtonSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
 
 
   
   const Clients = () => {
-    const [data, setData] = useState([]);
-    const [startDate, setStartDate] = useState(null);
-const [endDate, setEndDate] = useState(null);
-
-
-    const token = getAccessToken()
-    const fetchClients = async () => {
-      try {
-
-        const headers = {
-          Authorization: `Bearer ${token}`
-        };
-  
-        const response = await axios.get(`${environment.apiUrl}/client/getAllClient`, { headers });
-        const responseData = response.data;
-        if (responseData.success) {
-          const modifiedData = responseData.clients.map((item) => ({
-            ...item,
-            id: item._id, // Set id for DataGrid row key
-          }));
-  
-          modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  
-          setData(modifiedData);
-        } else {
-          console.error("Failed to fetch clients:", responseData.message);
-        }
-      } catch (error) {
-        console.error("Error fetching clients:", error);
-      }
-    };
-  
-    useEffect(() => {
-      fetchClients();
-    }, []);
+    const { data: responseData, isPending } = useClients();
+    const deleteClient = useDeleteClient();
+    const updateClientStatus = useUpdateClientStatus();
+    const data = (responseData?.clients || [])
+      .map((item) => ({ ...item, id: item._id }))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   
     const exportToPdf = () => {
       const doc = new jsPDF();
@@ -80,28 +53,13 @@ const [endDate, setEndDate] = useState(null);
         confirmButtonText: "Delete",
       }).then((result) => {
         if (result.isConfirmed) {
-
-            const headers = {
-              Authorization: `Bearer ${token}`
-            };
-          axios
-            .delete(environment.apiUrl + `/client/deleteClientById/${id}`,{headers})
-            .then((response) => {
-              if (response.status !== 200) {
-                throw new Error("Failed to delete client");
-              }
-  
-              setData(data.filter((item) => item.id !== id));
-              Swal.fire("Deleted!", "The client has been deleted.", "success");
-            })
-            .catch((error) => {
+          deleteClient.mutate(id, {
+            onSuccess: () => Swal.fire("Deleted!", "The client has been deleted.", "success"),
+            onError: (error) => {
               console.error("Error deleting client:", error);
-              Swal.fire(
-                "Error!",
-                "Failed to delete client. Please try again later.",
-                "error"
-              );
-            });
+              Swal.fire("Error!", "Failed to delete client. Please try again later.", "error");
+            },
+          });
         }
       });
     };
@@ -117,36 +75,16 @@ const [endDate, setEndDate] = useState(null);
         confirmButtonText: "Yes, change it!",
       }).then((result) => {
         if (result.isConfirmed) {
-
-            const headers = {
-              Authorization: `Bearer ${token}`
-            };
-        
-          axios
-            .patch(environment.apiUrl + `/client/updateStatus/${id}`, { clientStatus: newStatus },{headers})
-            .then((response) => {
-                console.log(response);
-              if (response.status !== 200) {
-                throw new Error("Failed to update status");
-              }
-  
-              const updatedData = data.map((item) => {
-                if (item.id === id) {
-                  return { ...item, clientStatus: newStatus };
-                }
-                return item;
-              });
-              setData(updatedData);
-              Swal.fire("Updated!", "The client status has been updated.", "success");
-            })
-            .catch((error) => {
-              console.error("Error updating client status:", error);
-              Swal.fire(
-                "Error!",
-                "Failed to update client status. Please try again later.",
-                "error"
-              );
-            });
+          updateClientStatus.mutate(
+            { id, status: newStatus },
+            {
+              onSuccess: () => Swal.fire("Updated!", "The client status has been updated.", "success"),
+              onError: (error) => {
+                console.error("Error updating client status:", error);
+                Swal.fire("Error!", "Failed to update client status. Please try again later.", "error");
+              },
+            }
+          );
         }
       });
     };
@@ -240,6 +178,7 @@ const [endDate, setEndDate] = useState(null);
           <DataGrid
             rows={data}
             columns={columns}
+            loading={isPending}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

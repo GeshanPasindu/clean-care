@@ -6,11 +6,11 @@ import WorkOutlineRoundedIcon from "@mui/icons-material/WorkOutlineRounded";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import { Box, Card, CardContent, Grid, Skeleton, Typography } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
-import axios from "axios";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { pageContainerSx, pageHeaderRowSx } from "../../styles/uiStyles";
+import { useServiceQuery } from "../../queries/queryHelpers";
+import { dashboardService } from "../../services/dashboardService";
 
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -59,44 +59,14 @@ const MetricCard = ({ label, value, icon, color, loading, currency = false }) =>
 };
 
 const AdminDashboard = () => {
-  const [metrics, setMetrics] = useState({
+  const { data: metrics = {
     staff: 0,
     clients: 0,
     jobs: 0,
     totalPayments: 0,
     staffPayments: 0,
     profit: 0,
-  });
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchCounts = async () => {
-      try {
-        const [staffResponse, clientResponse, jobResponse, totalsResponse] = await Promise.all([
-          axios.get(`${environment.apiUrl}/staff/getAllStaffCount`),
-          axios.get(`${environment.apiUrl}/client/getAllClientCount`),
-          axios.get(`${environment.apiUrl}/job/getCount`),
-          axios.get(`${environment.apiUrl}/job/getTotalAndProfit`),
-        ]);
-        const totals = totalsResponse.data.data || {};
-
-        setMetrics({
-          staff: staffResponse.data.count || 0,
-          clients: clientResponse.data.count || 0,
-          jobs: jobResponse.data.count || 0,
-          totalPayments: totals.totalOrgTotal || 0,
-          staffPayments: totals.totalStaffPayTotal || 0,
-          profit: totals.totalProfit || 0,
-        });
-      } catch (error) {
-        console.error("Error fetching dashboard data:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchCounts();
-  }, []);
+  }, isPending: loading } = useServiceQuery(["dashboard", "metrics"], dashboardService.getMetrics);
 
   const cards = [
     { label: "Staff members", value: metrics.staff, icon: PeopleAltOutlinedIcon, color: "#4f46e5" },

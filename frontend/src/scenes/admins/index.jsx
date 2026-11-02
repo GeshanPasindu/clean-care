@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import {
     Delete as DeleteIcon,
     Visibility as VisibilityIcon,
@@ -8,46 +7,20 @@ import {
   import { DataGrid, GridToolbar } from "@mui/x-data-grid";
   import jsPDF from "jspdf";
   import "jspdf-autotable";
-  import React, { useEffect, useState } from "react";
+  import React from "react";
   import { Link } from "react-router-dom";
   import Swal from "sweetalert2";
-  import axios from "axios";
   import Header from "../../components/Header";
-  import { environment } from "../../environment";
+  import { useAdmins, useChangeAdminStatus, useDeleteAdmin } from "./adminQueries";
   import { actionButtonSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
   
   const Admin = () => {
-    const [data, setData] = useState([]);
-    const token = getAccessToken();
-  
-    const fetchAdmins = async () => {
-      try {
-        const headers = {
-          Authorization: `Bearer ${token}`
-        };
-  
-        const response = await axios.get(`${environment.apiUrl}/admin/getAllAdmins`, { headers });
-        const responseData = response.data;
-        if (responseData.success) {
-          const modifiedData = responseData.admins.map((item) => ({
-            ...item,
-            id: item._id, // Set id for DataGrid row key
-          }));
-  
-          modifiedData.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  
-          setData(modifiedData);
-        } else {
-          console.error("Failed to fetch admins:", responseData.message);
-        }
-      } catch (error) {
-        console.error("Error fetching admins:", error);
-      }
-    };
-  
-    useEffect(() => {
-      fetchAdmins();
-    }, []);
+    const { data: responseData, isPending } = useAdmins();
+    const deleteAdmin = useDeleteAdmin();
+    const changeAdminStatus = useChangeAdminStatus();
+    const data = (responseData?.admins || [])
+      .map((item) => ({ ...item, id: item._id }))
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   
     const exportToPdf = () => {
       const doc = new jsPDF();
@@ -74,27 +47,13 @@ import {
         confirmButtonText: "Delete",
       }).then((result) => {
         if (result.isConfirmed) {
-          const headers = {
-            Authorization: `Bearer ${token}`
-          };
-          axios
-            .delete(environment.apiUrl + `/user/deleteUser/${id}`, { headers })
-            .then((response) => {
-              if (response.status !== 200) {
-                throw new Error("Failed to delete admin");
-              }
-  
-              setData(data.filter((item) => item.id !== id));
-              Swal.fire("Deleted!", "The admin has been deleted.", "success");
-            })
-            .catch((error) => {
+          deleteAdmin.mutate(id, {
+            onSuccess: () => Swal.fire("Deleted!", "The admin has been deleted.", "success"),
+            onError: (error) => {
               console.error("Error deleting admin:", error);
-              Swal.fire(
-                "Error!",
-                "Failed to delete admin. Please try again later.",
-                "error"
-              );
-            });
+              Swal.fire("Error!", "Failed to delete admin. Please try again later.", "error");
+            },
+          });
         }
       });
     };
@@ -110,34 +69,16 @@ import {
         confirmButtonText: "Yes, change it!",
       }).then((result) => {
         if (result.isConfirmed) {
-          const headers = {
-            Authorization: `Bearer ${token}`
-          };
-  
-          axios
-            .patch(environment.apiUrl + `/admin/updateStatus/${id}`, { status: newStatus }, { headers })
-            .then((response) => {
-              if (response.status !== 200) {
-                throw new Error("Failed to update status");
-              }
-  
-              const updatedData = data.map((item) => {
-                if (item.id === id) {
-                  return { ...item, status: newStatus };
-                }
-                return item;
-              });
-              setData(updatedData);
-              Swal.fire("Updated!", "The admin status has been updated.", "success");
-            })
-            .catch((error) => {
-              console.error("Error updating admin status:", error);
-              Swal.fire(
-                "Error!",
-                "Failed to update admin status. Please try again later.",
-                "error"
-              );
-            });
+          changeAdminStatus.mutate(
+            { id, status: newStatus },
+            {
+              onSuccess: () => Swal.fire("Updated!", "The admin status has been updated.", "success"),
+              onError: (error) => {
+                console.error("Error updating admin status:", error);
+                Swal.fire("Error!", "Failed to update admin status. Please try again later.", "error");
+              },
+            }
+          );
         }
       });
     };
@@ -238,6 +179,7 @@ import {
           <DataGrid
             rows={data}
             columns={columns}
+            loading={isPending}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

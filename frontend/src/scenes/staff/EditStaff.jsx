@@ -1,4 +1,3 @@
-import { getAccessToken } from "../../auth/apiClient";
 import React, { useEffect, useState } from 'react';
 import {
   Box,
@@ -14,14 +13,16 @@ import {
   Typography,
 } from '@mui/material';
 import MuiAlert from '@mui/material/Alert';
-import axios from 'axios';
 import { useNavigate, useParams } from "react-router-dom";
 import Header from "../../components/Header";
-import { environment } from "../../environment";
 import { Formik, Form, Field, ErrorMessage } from 'formik';
 import * as yup from 'yup';
 import { formPageSx } from "../../styles/uiStyles";
 import { useAuth } from "../../auth/AuthContext";
+import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
+import { adminService } from "../../services/adminService";
+import { staffService } from "../../services/staffService";
+import { userService } from "../../services/userService";
 
 const phoneNumberRegex = /^(\+\d{1,3}[- ]?)?\d{10}$/;
 const bankAcNoRegex = /^\d{8,20}$/;
@@ -46,11 +47,16 @@ const staffSchema = yup.object().shape({
 
 const EditStaff = () => {
   const { id } = useParams();
-  const token = getAccessToken();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === "superAdmin";
-  const [admins, setAdmins] = useState([]);
-  const [adminLoadError, setAdminLoadError] = useState("");
+  const adminsQuery = useServiceQuery(["admins", "list"], adminService.getAll, {
+    enabled: isSuperAdmin,
+  });
+  const admins = adminsQuery.data?.admins || [];
+  const adminLoadError = adminsQuery.isError ? "Could not load admin supervisors." : "";
+  const staffQuery = useServiceQuery(["staff", "detail", id], () => staffService.getById(id), {
+    enabled: Boolean(id),
+  });
 
   const [staffDetails, setStaffDetails] = useState({
     firstName: "",
@@ -80,50 +86,25 @@ const EditStaff = () => {
   const [alertSeverity, setAlertSeverity] = useState('success');
   const [alertMessage, setAlertMessage] = useState('');
   const staffName = [staffDetails.firstName, staffDetails.lastName].filter(Boolean).join(" ");
+  const updateStaffMutation = useServiceMutation(
+    ({ staffId, updates }) => userService.updateStaff(staffId, updates),
+    { invalidate: [["staff"], ["staff", "detail", id]] }
+  );
+
+  const fetchStaffDetails = async () => {
+    const staff = staffQuery.data?.staff;
+    if (!staff) return;
+    const staffValues = { ...staff };
+    staffValues.payFrequency = staffValues.payFrequency || "Weekly";
+    staffValues.supervisorId = staffValues.supervisorId || (typeof staffValues.adminId === "object" ? staffValues.adminId?._id : staffValues.adminId) || "";
+    staffValues.dateOfBirth = staffValues.dateOfBirth ? staffValues.dateOfBirth.split('T')[0] : new Date().toISOString().split('T')[0];
+    staffValues.dateOfHire = staffValues.dateOfHire ? staffValues.dateOfHire.split('T')[0] : new Date().toISOString().split('T')[0];
+    setStaffDetails(staffValues);
+  };
 
   useEffect(() => {
     fetchStaffDetails();
-  }, [id]);
-
-  useEffect(() => {
-    if (!isSuperAdmin) return undefined;
-    let active = true;
-    axios.get(`${environment.apiUrl}/admin/getAllAdmins`, {
-      headers: { Authorization: `Bearer ${token}` },
-    }).then(({ data }) => {
-      if (active) setAdmins(data.admins || []);
-    }).catch(() => {
-      if (active) setAdminLoadError("Could not load admin supervisors.");
-    });
-    return () => { active = false; };
-  }, [isSuperAdmin, token]);
-
-  const fetchStaffDetails = async () => {
-    try {
-      const response = await axios.get(environment.apiUrl + `/staff/getStaffById/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-
-      const responseData = response.data;
-      if (responseData.success) {
-        const staff = responseData.staff;
-        staff.payFrequency = staff.payFrequency || "Weekly";
-        staff.supervisorId = staff.supervisorId || (typeof staff.adminId === "object" ? staff.adminId?._id : staff.adminId) || "";
-
-        // Convert date fields to 'YYYY-MM-DD' format if they exist
-        staff.dateOfBirth = staff.dateOfBirth ? staff.dateOfBirth.split('T')[0] : new Date().toISOString().split('T')[0];
-        staff.dateOfHire = staff.dateOfHire ? staff.dateOfHire.split('T')[0] : new Date().toISOString().split('T')[0];
-
-        setStaffDetails(staff);
-      } else {
-        console.error('Failed to fetch staff details:', responseData.message);
-      }
-    } catch (error) {
-      console.error('Error fetching staff details:', error);
-    }
-  };
+  }, [staffQuery.data]);
 
   const handleUpdateStaff = async (values) => {
     setIsLoading(true);
@@ -132,20 +113,13 @@ const EditStaff = () => {
     try {
       const updates = { ...values };
       if (!isSuperAdmin) delete updates.supervisorId;
-      const response = await axios.put(environment.apiUrl + `/user/updateStaff/${id}`, updates, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      });
-      if (response.status === 200) {
+      await updateStaffMutation.mutateAsync({ staffId: id, updates });
+      {
         setAlertSeverity('success');
         setAlertMessage('Staff updated successfully');
         setTimeout(() => {
           navigate('/staff');
         }, 2000);
-      } else {
-        setAlertSeverity('error');
-        setAlertMessage(`Failed to update staff: ${response.data.message}`);
       }
     } catch (error) {
       setAlertSeverity('error');

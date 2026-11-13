@@ -1,5 +1,7 @@
 # Authentication and user accounts
 
+The backend is TypeScript. Development, build commands, validation, and the source review map are in [README.md](./README.md). Existing `auth:*` commands now run their TypeScript scripts through `tsx`; install development dependencies before running these local maintenance commands.
+
 ## Account model
 
 Every person who can sign in is stored in the single `User` collection. This includes platform superadmins, tenant administrators or supervisors, and paid employees. Account identity, profile, employment, and bank details are fields on that User record.

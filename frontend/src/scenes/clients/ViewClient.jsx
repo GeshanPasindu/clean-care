@@ -34,7 +34,7 @@ const ViewClient = () => {
           </Button>
         </Link>
       </Box>
-      <DetailGrid data={clientDetails} exclude={["_id", "createdAt", "__v", "updatedAt", "adminId"]} />
+      <DetailGrid data={clientDetails} exclude={["_id", "createdAt", "__v", "updatedAt", "tenantId"]} />
     </Box>
   );
 };

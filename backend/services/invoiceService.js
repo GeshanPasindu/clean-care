@@ -1,8 +1,14 @@
 import mongoose from "mongoose";
 import Client from "../models/clientModel.js";
 import Invoice from "../models/invoiceModel.js";
-import { adminScope, invoiceScope } from "./authorizationService.js";
+import { invoiceScope, tenantDataScope } from "./authorizationService.js";
 import { ServiceError } from "./serviceError.js";
+
+const parsePage = (value, fallback, max) => {
+  const parsed = Number(value ?? fallback);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+};
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const validateAmount = (amount) => {
   if (amount !== undefined && (!Number.isFinite(Number(amount)) || Number(amount) < 0)) {
@@ -26,7 +32,7 @@ export const invoiceService = {
     validateAmount(amount);
     validateNotes(notes);
 
-    const clientExists = await Client.findOne({ _id: client, ...(await adminScope({ user })) }).select("_id");
+    const clientExists = await Client.findOne({ _id: client, ...(await tenantDataScope({ user })) }).select("_id");
     if (!clientExists) throw new ServiceError("Client not found", 404);
 
     return Invoice.create({
@@ -45,7 +51,7 @@ export const invoiceService = {
     validateAmount(amount);
     validateNotes(notes);
 
-    if (client !== undefined && !(await Client.exists({ _id: client, ...(await adminScope({ user })) }))) {
+    if (client !== undefined && !(await Client.exists({ _id: client, ...(await tenantDataScope({ user })) }))) {
       throw new ServiceError("Client not found", 404);
     }
     const updates = {
@@ -72,7 +78,7 @@ export const invoiceService = {
   },
 
   async getAll(query = {}, user) {
-    const { startDate, endDate } = query;
+    const { startDate, endDate, search: rawSearch = "" } = query;
     const filter = { ...(await invoiceScope({ user })) };
     if (startDate || endDate) {
       if (typeof startDate !== "string" || typeof endDate !== "string") {
@@ -87,9 +93,33 @@ export const invoiceService = {
       end.setHours(23, 59, 59, 999);
       filter.sendDate = { $gte: start, $lte: end };
     }
-    return Invoice.find(filter)
-      .populate({ path: "client", select: "firstName lastName" })
-      .sort({ createdAt: -1 });
+    if (typeof rawSearch !== "string") throw new ServiceError("Invalid search", 400);
+    const search = rawSearch.trim().slice(0, 100);
+    if (search) {
+      const regex = { $regex: escapeRegex(search), $options: "i" };
+      const matchingClients = await Client.find({
+        ...(await tenantDataScope({ user })),
+        $or: [{ firstName: regex }, { lastName: regex }, { email: regex }],
+      }).select("_id").lean();
+      filter.$or = [
+        { invoiceTitle: regex }, { invoiceDescription: regex },
+        { client: { $in: matchingClients.map((client) => client._id) } },
+      ];
+    }
+    const page = parsePage(query.page, 1, Number.MAX_SAFE_INTEGER);
+    const limit = parsePage(query.limit, 25, 100);
+    const [totalResult, invoices] = await Promise.all([
+      Invoice.countDocuments(filter),
+      Invoice.find(filter)
+        .populate({ path: "client", select: "firstName lastName" })
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+    ]);
+    return {
+      invoices,
+      paginationInfo: { totalResult, totalPages: Math.ceil(totalResult / limit), currentPage: page, pageSize: limit },
+    };
   },
 
   async updateStatus(id, invoiceStatus, user) {

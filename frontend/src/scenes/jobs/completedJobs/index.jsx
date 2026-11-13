@@ -1,21 +1,27 @@
 import {
   Visibility as VisibilityIcon,
 } from "@mui/icons-material";
-import { Box, Button, IconButton, Tooltip } from "@mui/material";
+import { Box, Button, IconButton, TextField, Tooltip } from "@mui/material";
 import { DataGrid, GridToolbar } from "@mui/x-data-grid";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import Header from "../../../components/Header";
 import { pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../../styles/uiStyles";
 import { useServiceQuery } from "../../../queries/queryHelpers";
 import { jobService } from "../jobService";
+import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
 
 const CompletedJobs = () => {
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput.trim());
+  const params = { page: page + 1, limit: pageSize, ...(search ? { search } : {}) };
   const { data: responseData, isPending } = useServiceQuery(
-    ["jobs", "completed"],
-    jobService.getAllCompleted
+    ["jobs", "completed", params],
+    () => jobService.getAllCompleted(params)
   );
   const data = (responseData?.jobs || [])
     .map((item) => ({ ...item, startTime: item.startTime ? item.startTime.split("T")[0] : "N/A", id: item._id }))
@@ -83,6 +89,9 @@ const CompletedJobs = () => {
       <Box sx={pageHeaderRowSx}>
         <Header title="Completed Jobs" subtitle="List of all completed jobs" />
       </Box>
+      <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
+        <TextField size="small" label="Search completed jobs" value={searchInput} onChange={(event) => { setSearchInput(event.target.value); setPage(0); }} sx={{ minWidth: 260 }} />
+      </Box>
       {/* <Box display="flex" justifyContent="flex-start">
         <Button
           variant="contained"
@@ -100,7 +109,19 @@ const CompletedJobs = () => {
         </Button>
       </Box> */}
       <Box sx={tableSurfaceSx}>
-        <DataGrid rows={data} columns={columns} loading={isPending} components={{ Toolbar: GridToolbar }} />
+        <DataGrid
+          rows={data}
+          columns={columns}
+          loading={isPending}
+          components={{ Toolbar: GridToolbar }}
+          page={page}
+          pageSize={pageSize}
+          rowCount={responseData?.paginationInfo?.totalResult || 0}
+          paginationMode="server"
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
+        />
       </Box>
     </Box>
   );

@@ -25,43 +25,52 @@ import { useAuth } from "../../auth/AuthContext";
   import { actionButtonSx, filterBarSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
   import { useQuery } from "@tanstack/react-query";
   import { useClients } from "../clients/clientQueries";
-  import { useStaff } from "../staff/staffQueries";
+  import { useActiveEmployees } from "../users/userQueries";
   import { jobService } from "./jobService";
   import { useServiceMutation } from "../../queries/queryHelpers";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 
 
   const Jobs = () => {
-    const { user } = useAuth();
+    const { user, hasPermission } = useAuth();
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
     const [currentTime, setCurrentTime] = useState(Date.now());
     const [selectedStaff, setSelectedStaff] = useState("");
     const [selectedClient, setSelectedClient] = useState("");
     const [filters, setFilters] = useState({});
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState(25);
+    const [searchInput, setSearchInput] = useState("");
+    const search = useDebouncedValue(searchInput.trim());
+    const queryParams = { ...filters, page: page + 1, limit: pageSize, ...(search ? { search } : {}) };
 
 
     
     
   
-    const userRole = user?.role;
-    const shouldShowButton = userRole !== "staff";
-    const userStaff = userRole ==='staff'
+    const canCreateJobs = hasPermission("jobs.create");
+    const canUpdateJobs = hasPermission("jobs.update");
+    const canDeleteJobs = hasPermission("jobs.delete");
+    const canUpdateStatus = hasPermission("jobs.status.update");
+    const canReadFinancials = hasPermission("jobs.financials.read");
+    const canReadUsers = hasPermission("users.read");
+    const canReadClients = hasPermission("clients.read");
+    const userStaff = user?.scope === "staff";
   
     const userId = user?.id;
     const jobsQuery = useQuery({
-      queryKey: ["jobs", "list", userRole, userId, filters],
-      queryFn: () => userRole === "staff"
-        ? jobService.getByStaff(userId || "self", filters)
-        : jobService.getAllJobs(filters),
-      enabled: Boolean(userRole),
+      queryKey: ["jobs", "list", user?.scope, userId, queryParams],
+      queryFn: () => jobService.getAll(queryParams),
+      enabled: Boolean(user?.scope && hasPermission("jobs.read")),
     });
     const activeJobQuery = useQuery({
       queryKey: ["jobs", "staff-active", userId],
       queryFn: () => jobService.getByStaff(userId || "self"),
       enabled: userStaff,
     });
-    const { data: staffResponse } = useStaff({ enabled: shouldShowButton });
-    const { data: clientResponse } = useClients({ enabled: shouldShowButton });
+    const { data: staffResponse } = useActiveEmployees({ enabled: canReadUsers });
+    const { data: clientResponse } = useClients({ enabled: canReadClients });
     const changeJobStatus = useServiceMutation(
       ({ id, status }) => jobService.updateStatus(id, { jobStatus: status }),
       { invalidate: [["jobs"]] }
@@ -72,11 +81,10 @@ import { useAuth } from "../../auth/AuthContext";
       { invalidate: [["jobs"]] }
     );
     const attendanceUpdating = updateAttendance.isPending;
-    const staff = (staffResponse?.staffs || []).map((item) => ({ ...item, id: item._id }));
+    const staff = (staffResponse?.users || []).map((item) => ({ ...item, id: item._id }));
     const clients = (clientResponse?.clients || []).map((item) => ({ ...item, id: item._id }));
     const data = (jobsQuery.data?.jobs || [])
-      .map((item) => ({ ...item, id: item._id, jobDate: formatTime(item.jobDate) }))
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      .map((item) => ({ ...item, id: item._id, jobDate: formatTime(item.jobDate) }));
     const activeJob = (activeJobQuery.data?.jobs || []).find((job) =>
       job.currentStaffAssignment?.isSignIn && !job.currentStaffAssignment?.isSignOff
     ) || null;
@@ -194,6 +202,7 @@ import { useAuth } from "../../auth/AuthContext";
         ...(selectedStaff ? { staffId: selectedStaff } : {}),
         ...(selectedClient ? { clientId: selectedClient } : {}),
       });
+      setPage(0);
     };
 
     const vievAlljobs = () =>{
@@ -202,6 +211,7 @@ import { useAuth } from "../../auth/AuthContext";
       setSelectedClient('')
       setSelectedStaff('');
       setFilters({});
+      setPage(0);
     }
 
   let columns =[]
@@ -244,12 +254,11 @@ import { useAuth } from "../../auth/AuthContext";
       //   headerName: "Total Payment",
       //   flex: 0.5,
       // },
-      { field: "staffPayTotal", headerName: "Staff Payment", flex: 0.5, },
       {
         field: "jobStatus",
         headerName: "Status",
         flex: 0.6,
-        renderCell: (params) => (
+        renderCell: (params) => canUpdateStatus ? (
           <Select
             value={params.row.jobStatus}
             onChange={(e) => handleStatusChange(params.row.id,e.target.value)}
@@ -258,14 +267,14 @@ import { useAuth } from "../../auth/AuthContext";
             <MenuItem value="Completed">Completed</MenuItem>
             <MenuItem value="Cancelled">Cancelled</MenuItem>
           </Select>
-        ),
+        ) : params.row.jobStatus,
       },
       {
         field: "Actions",
         headerName: "Actions",
         flex: 0.6,
         renderCell: (params) => (
-          <Box>{shouldShowButton &&
+          <Box>{canUpdateJobs &&
             <Tooltip title="Edit">
               <Link to={`/jobs/editjob/${params.row.id}`}>
                 <IconButton>
@@ -286,7 +295,7 @@ import { useAuth } from "../../auth/AuthContext";
                 </IconButton>
               </Link>
             </Tooltip>
-            {shouldShowButton &&
+            {canDeleteJobs &&
             <Tooltip title="Delete">
             <IconButton onClick={() => handleDeleteClick(params.row.id)}>
               <DeleteIcon />
@@ -330,9 +339,10 @@ import { useAuth } from "../../auth/AuthContext";
       });
     }
 
-    if (shouldShowButton) {
+    if (canReadFinancials) {
       columns.splice(6, 0, { field: "orgNoOfhours", headerName: "Original No Hours", flex: 0.4 });
       columns.splice(7, 0, { field: "orgTotal", headerName: "Total Payment", flex: 0.4 });
+      columns.splice(8, 0, { field: "staffPayTotal", headerName: "Staff Payment", flex: 0.5 });
     }
    
   
@@ -340,7 +350,7 @@ import { useAuth } from "../../auth/AuthContext";
       <Box sx={pageContainerSx}>
         <Box sx={pageHeaderRowSx}>
           <Header title="Jobs Management" subtitle="Managing the jobs" />
-          {shouldShowButton && (
+          {canCreateJobs && (
             <Box>
               <Link to={"/jobs/newjob"} style={{ textDecoration: "none" }}>
                 <Button
@@ -451,9 +461,9 @@ import { useAuth } from "../../auth/AuthContext";
       />
     </Box>
   </Box>
-  {shouldShowButton && (
+  {(canReadUsers || canReadClients) && (
     <Box  display="flex" justifyContent="flex-start" alignItems="center" gap="10px">
-      <Box>
+      {canReadUsers && <Box>
         <Typography fontWeight="bold" fontSize="16px">Staff</Typography>
         <Select
           fullWidth
@@ -466,8 +476,8 @@ import { useAuth } from "../../auth/AuthContext";
             <MenuItem key={staff.id} value={staff.id}>{staff.firstName} {staff.lastName}</MenuItem>
           ))}
         </Select>
-      </Box>
-      <Box>
+      </Box>}
+      {canReadClients && <Box>
         <Typography fontWeight="bold" fontSize="16px">Client</Typography>
         <Select
           fullWidth
@@ -480,13 +490,13 @@ import { useAuth } from "../../auth/AuthContext";
             <MenuItem key={client.id} value={client.id}>{client.firstName} {client.lastName}</MenuItem>
           ))}
         </Select>
-      </Box>
+      </Box>}
     </Box>
   )}
   <Button
     variant="contained"
     onClick={handleViewJobs}
-    disabled={(!startDate && endDate) || (startDate && !endDate)}
+    disabled={Boolean(startDate) !== Boolean(endDate)}
   >
     Filter jobs
   </Button>
@@ -513,10 +523,20 @@ import { useAuth } from "../../auth/AuthContext";
 </Box>
 
         <Box sx={tableSurfaceSx}>
+          <Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, pt: 2 }}>
+            <TextField size="small" label="Search jobs" value={searchInput} onChange={(event) => { setSearchInput(event.target.value); setPage(0); }} sx={{ minWidth: 250 }} />
+          </Box>
           <DataGrid
             rows={data}
             columns={columns}
             loading={jobsQuery.isPending}
+            page={page}
+            pageSize={pageSize}
+            rowCount={jobsQuery.data?.paginationInfo?.totalResult || 0}
+            paginationMode="server"
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

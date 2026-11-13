@@ -1,4 +1,3 @@
-import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
 import BusinessCenterOutlinedIcon from "@mui/icons-material/BusinessCenterOutlined";
 import CheckCircleOutlineRoundedIcon from "@mui/icons-material/CheckCircleOutlineRounded";
@@ -8,6 +7,7 @@ import GroupOutlinedIcon from "@mui/icons-material/GroupOutlined";
 import MenuRoundedIcon from "@mui/icons-material/MenuRounded";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
+import VpnKeyOutlinedIcon from "@mui/icons-material/VpnKeyOutlined";
 import { Box, IconButton, Typography, useMediaQuery, useTheme } from "@mui/material";
 import { useState } from "react";
 import { Menu, MenuItem, ProSidebar } from "react-pro-sidebar";
@@ -30,11 +30,7 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { user } = useAuth();
-  const userRole = user?.role;
-
-  const showManagement = userRole !== "staff";
-  const showSuperAdmin = userRole === "superAdmin";
+  const { hasPermission } = useAuth();
   const handleNavigate = () => {
     if (isMobile) setIsSidebar(false);
   };
@@ -139,7 +135,7 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
             </Typography>
           )}
 
-          {showManagement && (
+          {hasPermission("dashboard.view") && (
             <NavItem
               title="Dashboard"
               to="/dashboard"
@@ -148,15 +144,14 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
               onNavigate={handleNavigate}
             />
           )}
-          <NavItem
+          {hasPermission("jobs.read") && <NavItem
             title="Jobs"
             to="/jobs"
             icon={<BusinessCenterOutlinedIcon />}
             isActive={matches("/jobs", true) && !matches("/jobs/paymentSummery")}
             onNavigate={handleNavigate}
-          />
-          {showManagement && (
-            <>
+          />}
+          {hasPermission("jobs.completed.read") && (
               <NavItem
                 title="Completed Jobs"
                 to="/completedjobs"
@@ -164,6 +159,8 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
                 isActive={matches("/completedjobs")}
                 onNavigate={handleNavigate}
               />
+          )}
+          {hasPermission("jobs.financials.read") && (
               <NavItem
                 title="Payment Summary"
                 to="/paymentsummery"
@@ -171,6 +168,8 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
                 isActive={matches("/paymentsummery")}
                 onNavigate={handleNavigate}
               />
+          )}
+          {hasPermission("clients.read") && (
               <NavItem
                 title="Clients"
                 to="/clients"
@@ -178,6 +177,8 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
                 isActive={matches("/clients", true)}
                 onNavigate={handleNavigate}
               />
+          )}
+          {hasPermission("invoices.read") && (
               <NavItem
                 title="Invoices"
                 to="/invoices"
@@ -185,23 +186,24 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
                 isActive={matches("/invoices", true)}
                 onNavigate={handleNavigate}
               />
+          )}
+          {hasPermission("users.read") && (
               <NavItem
-                title="Staff"
-                to="/staff"
+                title="Users"
+                to="/users"
                 icon={<GroupOutlinedIcon />}
-                isActive={matches("/staff", true)}
+                isActive={matches("/users", true)}
                 onNavigate={handleNavigate}
               />
-            </>
           )}
-          <NavItem
+          {hasPermission("timesheets.read") && <NavItem
             title="Timesheets"
             to="/timesheets"
             icon={<AccessTimeOutlinedIcon />}
             isActive={matches("/timesheets", true)}
             onNavigate={handleNavigate}
-          />
-          {userRole === "staff" && (
+          />}
+          {hasPermission("payroll.self.read") && (
             <NavItem
               title="My Payments"
               to="/my-payments"
@@ -210,12 +212,12 @@ const Sidebar = ({ isSidebar, setIsSidebar }) => {
               onNavigate={handleNavigate}
             />
           )}
-          {showSuperAdmin && (
+          {hasPermission("roles.manage") && (
             <NavItem
-              title="Administrators"
-              to="/admin"
-              icon={<AdminPanelSettingsOutlinedIcon />}
-              isActive={matches("/admin", true)}
+              title="Roles & permissions"
+              to="/roles"
+              icon={<VpnKeyOutlinedIcon />}
+              isActive={matches("/roles", true)}
               onNavigate={handleNavigate}
             />
           )}

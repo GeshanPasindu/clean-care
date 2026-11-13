@@ -18,7 +18,7 @@ import { Formik, Form, Field, ErrorMessage } from 'formik';
 import * as yup from 'yup';
 import { formPageSx } from "../../styles/uiStyles";
 import { useActiveClients } from "../clients/clientQueries";
-import { useActiveStaff } from "../staff/staffQueries";
+import { useAssignableStaff } from "../users/userQueries";
 import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers";
 import { jobService } from "./jobService";
 
@@ -38,12 +38,16 @@ const jobSchema = yup.object().shape({
 const EditJob = () => {
   const { id } = useParams();
   const clientsQuery = useActiveClients();
-  const staffsQuery = useActiveStaff();
+  const staffsQuery = useAssignableStaff();
   const jobQuery = useServiceQuery(["jobs", "detail", id], () => jobService.getById(id), {
     enabled: Boolean(id),
   });
-  const clients = clientsQuery.data?.clients || [];
-  const staffs = staffsQuery.data?.staffs || [];
+  const availableClients = clientsQuery.data?.clients || [];
+  const currentClient = jobQuery.data?.job?.client;
+  const clients = currentClient?._id && !availableClients.some((client) => String(client._id) === String(currentClient._id))
+    ? [...availableClients, currentClient]
+    : availableClients;
+  const staffs = staffsQuery.data?.users || [];
 
   const [jobDetails, setJobDetails] = useState({
     jobName: '',

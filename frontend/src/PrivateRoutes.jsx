@@ -2,8 +2,8 @@ import { Box, CircularProgress } from "@mui/material";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 
-const PrivateRoute = ({ children, allowedRoles = [] }) => {
-  const { user, status } = useAuth();
+const PrivateRoute = ({ children, permission }) => {
+  const { user, status, hasPermission } = useAuth();
   const location = useLocation();
 
   if (status === "loading") {
@@ -12,8 +12,15 @@ const PrivateRoute = ({ children, allowedRoles = [] }) => {
   if (status !== "authenticated" || !user) {
     return <Navigate to="/" replace state={{ from: location }} />;
   }
-  if (allowedRoles.length && !allowedRoles.includes(user.role)) {
-    return <Navigate to={user.role === "staff" ? "/jobs" : "/dashboard"} replace />;
+  const requiredPermissions = Array.isArray(permission) ? permission : permission ? [permission] : [];
+  if (requiredPermissions.some((key) => !hasPermission(key))) {
+    const fallback = [
+      ["dashboard.view", "/dashboard"],
+      ["jobs.read", "/jobs"],
+      ["timesheets.read", "/timesheets"],
+      ["profile.read", "/profile"],
+    ].find(([key]) => hasPermission(key));
+    return <Navigate to={fallback?.[1] || "/"} replace />;
   }
   return children;
 };

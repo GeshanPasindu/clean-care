@@ -3,30 +3,35 @@ import {
     Visibility as VisibilityIcon,
   } from "@mui/icons-material";
   import EditIcon from "@mui/icons-material/Edit";
-  import { Box, Button, IconButton, MenuItem, Select, Tooltip } from "@mui/material";
+  import { Box, Button, IconButton, MenuItem, Select, TextField, Tooltip } from "@mui/material";
   import { DataGrid, GridToolbar } from "@mui/x-data-grid";
   import jsPDF from "jspdf";
   import "jspdf-autotable";
-  import React from "react";
+  import React, { useState } from "react";
   import { Link } from "react-router-dom";
   import Swal from "sweetalert2";
   import Header from "../../components/Header";
   import {
-    useClients,
+    useClientPage,
     useDeleteClient,
     useUpdateClientStatus,
   } from "./clientQueries";
   import { actionButtonSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
+  import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 
 
   
   const Clients = () => {
-    const { data: responseData, isPending } = useClients();
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState(25);
+    const [searchInput, setSearchInput] = useState("");
+    const search = useDebouncedValue(searchInput.trim());
+    const params = { page: page + 1, limit: pageSize, ...(search ? { search } : {}) };
+    const { data: responseData, isPending } = useClientPage(params);
     const deleteClient = useDeleteClient();
     const updateClientStatus = useUpdateClientStatus();
     const data = (responseData?.clients || [])
-      .map((item) => ({ ...item, id: item._id }))
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      .map((item) => ({ ...item, id: item._id }));
   
     const exportToPdf = () => {
       const doc = new jsPDF();
@@ -160,6 +165,9 @@ import {
             </Link>
           </Box>
         </Box>
+        <Box sx={{ display: "flex", justifyContent: "flex-end", mb: 2 }}>
+          <TextField size="small" label="Search clients" value={searchInput} onChange={(event) => { setSearchInput(event.target.value); setPage(0); }} sx={{ minWidth: 260 }} />
+        </Box>
         <Box sx={tableSurfaceSx}>
           {/* <Button
             variant="contained"
@@ -179,6 +187,13 @@ import {
             rows={data}
             columns={columns}
             loading={isPending}
+            page={page}
+            pageSize={pageSize}
+            rowCount={responseData?.paginationInfo?.totalResult || 0}
+            paginationMode="server"
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

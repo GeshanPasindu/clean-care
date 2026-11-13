@@ -71,7 +71,10 @@ export function AuthProvider({ children }) {
     setUser((current) => current ? { ...current, ...updates } : current);
   }, []);
 
-  const value = useMemo(() => ({ user, status, login, logout, updateUser }), [user, status, login, logout, updateUser]);
+  const hasPermission = useCallback((permission) =>
+    Boolean(user?.permissions?.includes(permission)), [user]);
+
+  const value = useMemo(() => ({ user, status, login, logout, updateUser, hasPermission }), [user, status, login, logout, updateUser, hasPermission]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

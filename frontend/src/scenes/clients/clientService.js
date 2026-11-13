@@ -2,6 +2,7 @@ import { apiRequest } from "../../services/apiClient";
 
 export const clientService = {
   getAll: () => apiRequest("client/getAllClient"),
+  getPaginated: (params = {}) => apiRequest("client/getAllClientPagination", { params }),
   getAllActive: () => apiRequest("client/getAllActiveClient"),
   getById: (id) => apiRequest(`client/getClientById/${encodeURIComponent(id)}`),
   create: (values) => apiRequest("client/addClient", { method: "POST", body: values }),

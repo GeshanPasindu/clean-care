@@ -6,7 +6,7 @@ import { useParams } from "react-router-dom";
 import Header from "../../components/Header";
 import { useAuth } from "../../auth/AuthContext";
 import { useServiceQuery } from "../../queries/queryHelpers";
-import { staffService } from "../../services/staffService";
+import { userService } from "../../services/userService";
 import { jobService } from "../jobs/jobService";
 import { filterBarSx, pageContainerSx, tableSurfaceSx } from "../../styles/uiStyles";
 import StaffPayoutReceiptDialog from "./StaffPayoutReceiptDialog";
@@ -15,23 +15,25 @@ import StaffPayrollSection from "./StaffPayrollSection";
 const StaffJobs = () => {
   const { id } = useParams();
   const { user } = useAuth();
-  const isStaffView = user?.role === "staff";
+  const isStaffView = !id;
+  const employeeId = id || user?.id;
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [appliedFilters, setAppliedFilters] = useState({});
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [selectedJob, setSelectedJob] = useState(null);
 
   const staffQuery = useServiceQuery(
     ["staff", "detail", id],
-    () => staffService.getById(id),
+    () => userService.getById(id),
     { enabled: Boolean(id) && !isStaffView }
   );
+  const queryParams = { ...appliedFilters, page: page + 1, limit: pageSize };
   const jobsQuery = useServiceQuery(
-    ["staff-jobs", isStaffView ? user?.id || "self" : id, appliedFilters],
-    () => isStaffView
-      ? jobService.getByStaff(user?.id || "self", appliedFilters)
-      : jobService.getStaffJobs(id, appliedFilters),
-    { enabled: Boolean(isStaffView || id) }
+    ["staff-jobs", employeeId, queryParams],
+    () => jobService.getStaffJobs(employeeId, queryParams),
+    { enabled: Boolean(employeeId) }
   );
   const jobs = useMemo(
     () => (jobsQuery.data?.jobs || []).map((job) => ({
@@ -41,11 +43,11 @@ const StaffJobs = () => {
     [jobsQuery.data]
   );
   const assignmentStaff = jobs[0]?.staffAssignment?.staff;
-  const staffRecord = staffQuery.data?.staff;
+  const staffRecord = staffQuery.data?.user;
   const staffName = isStaffView
     ? [assignmentStaff?.firstName, assignmentStaff?.lastName].filter(Boolean).join(" ") || user?.userName || "Staff member"
     : [staffRecord?.firstName, staffRecord?.lastName].filter(Boolean).join(" ");
-  const totalPayments = jobs.reduce((sum, job) => sum + Number(job.staffAssignment?.payment || 0), 0);
+  const totalPayments = Number(jobsQuery.data?.totalPayment || 0);
 
   const handlePaymentSaved = (updatedJob) => {
     setSelectedJob(updatedJob);
@@ -53,6 +55,7 @@ const StaffJobs = () => {
 
   const handleFilter = () => {
     setAppliedFilters(startDate && endDate ? { startDate, endDate } : {});
+    setPage(0);
   };
 
   const columns = [
@@ -109,7 +112,7 @@ const StaffJobs = () => {
         title={isStaffView ? "My Payments" : "Staff Payments"}
         subtitle={isStaffView ? "Your payout history" : staffName ? `Payouts for ${staffName}` : ""}
       />
-      <StaffPayrollSection staffId={isStaffView ? "self" : id} isStaffView={isStaffView} onSaved={() => jobsQuery.refetch()} />
+      <StaffPayrollSection staffId={employeeId} isStaffView={isStaffView} onSaved={() => jobsQuery.refetch()} />
       <Box sx={{ ...filterBarSx, mt: 2.5 }}>
         <Box display="flex" alignItems="center" gap="10px" flexWrap="wrap">
           <Box>
@@ -131,7 +134,20 @@ const StaffJobs = () => {
       </Box>
       {jobsQuery.isError && <Alert severity="error" sx={{ mb: 2 }}>{jobsQuery.error.message || "Could not load staff payments."}</Alert>}
       <Box sx={tableSurfaceSx}>
-        <DataGrid rows={jobs} columns={columns} components={{ Toolbar: GridToolbar }} getRowId={(row) => row._id} loading={jobsQuery.isPending} />
+        <DataGrid
+          rows={jobs}
+          columns={columns}
+          components={{ Toolbar: GridToolbar }}
+          getRowId={(row) => row._id}
+          loading={jobsQuery.isPending}
+          page={page}
+          pageSize={pageSize}
+          rowCount={jobsQuery.data?.paginationInfo?.totalResult || 0}
+          paginationMode="server"
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
+        />
       </Box>
       <StaffPayoutReceiptDialog
         open={Boolean(selectedJob)}

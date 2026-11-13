@@ -10,5 +10,5 @@ export const authService = {
     }),
   logout: () => apiRequest("auth/logout", { method: "POST", body: {}, skipAuthRefresh: true }),
   changePassword: (values) =>
-    apiRequest("auth/change-password", { method: "POST", body: values }),
+    apiRequest("users/me/password", { method: "PUT", body: values }),
 };

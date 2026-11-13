@@ -3,7 +3,7 @@ import { apiRequest } from "../../services/apiClient";
 export const jobService = {
   getAll: (params) => apiRequest("job/getAllJobPagination", { params }),
   getAllJobs: (params) => apiRequest("job/getAllJobs", { params }),
-  getAllCompleted: () => apiRequest("job/getAllCompletedJobs"),
+  getAllCompleted: (params) => apiRequest("job/getAllCompletedJobs", { params }),
   getById: (id) => apiRequest(`job/getJobById/${encodeURIComponent(id)}`),
   getCount: () => apiRequest("job/getCount"),
   getTotalAndProfit: () => apiRequest("job/getTotalAndProfit"),

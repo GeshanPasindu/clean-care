@@ -1,11 +1,11 @@
 import { clientService } from "../scenes/clients/clientService";
 import { jobService } from "../scenes/jobs/jobService";
-import { staffService } from "./staffService";
+import { userService } from "./userService";
 
 export const dashboardService = {
   async getMetrics() {
     const [staff, clients, jobs, totals] = await Promise.all([
-      staffService.getCount(),
+      userService.getCount("employees"),
       clientService.getCount(),
       jobService.getCount(),
       jobService.getTotalAndProfit(),

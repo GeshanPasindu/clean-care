@@ -39,7 +39,7 @@ const staffTimeEntrySchema = new Schema({
 const staffAssignmentSchema = new Schema({
     staff: {
         type: Schema.Types.ObjectId,
-        ref: 'Staff',
+        ref: 'User',
         required: true,
     },
     isAssigned: {
@@ -146,7 +146,7 @@ const jobSchema = new Schema(
         assignedStaff: {
             type: [{
                 type: Schema.Types.ObjectId,
-                ref: 'Staff',
+                ref: 'User',
             }],
             required: true,
             validate: {
@@ -204,9 +204,9 @@ const jobSchema = new Schema(
             type: Number,
             required: false,
         },
-        adminId: {
+        tenantId: {
             type: Schema.Types.ObjectId,
-            ref: 'Admin',
+            ref: 'User',
             required: true,
         },
         notes: {

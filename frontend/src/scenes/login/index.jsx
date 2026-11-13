@@ -58,7 +58,12 @@ function Login() {
     try {
       const user = await authenticate(formData);
       setNotification({ open: true, severity: "success", message: "Welcome back" });
-      navigate(user.role === "staff" ? "/jobs" : "/dashboard", { replace: true });
+      const destination = user.permissions?.includes("dashboard.view")
+        ? "/dashboard"
+        : user.permissions?.includes("jobs.read")
+          ? "/jobs"
+          : "/profile";
+      navigate(destination, { replace: true });
     } catch (error) {
       console.error(error);
       setNotification({

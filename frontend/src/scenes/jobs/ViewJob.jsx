@@ -10,9 +10,8 @@ import { useServiceMutation, useServiceQuery } from "../../queries/queryHelpers"
 import { jobService } from "./jobService";
 
 function ViewJob() {
-  const { user } = useAuth();
-  const userRole = user?.role;
-  const hideField = userRole === "staff";
+  const { hasPermission } = useAuth();
+  const hideField = !hasPermission("jobs.financials.read");
   const fieldsToHide = hideField
     ? ["orgNoOfhours", "orgHourRate", "orgTotal"]
     : [];

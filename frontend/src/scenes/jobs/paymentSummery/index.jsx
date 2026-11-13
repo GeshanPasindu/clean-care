@@ -7,24 +7,33 @@ import Header from "../../../components/Header";
 import { useAuth } from "../../../auth/AuthContext";
 import { useServiceMutation, useServiceQuery } from "../../../queries/queryHelpers";
 import { useClients } from "../../clients/clientQueries";
-import { useStaff } from "../../staff/staffQueries";
+import { useActiveEmployees } from "../../users/userQueries";
 import { filterBarSx, pageContainerSx, pageHeaderRowSx, surfaceSx, tableSurfaceSx } from "../../../styles/uiStyles";
 import { jobService } from "../jobService";
 import PaymentReceiptDialog from "./PaymentReceiptDialog";
+import { useDebouncedValue } from "../../../hooks/useDebouncedValue";
 
 
   const Jobs = () => {
-    const { user } = useAuth();
+    const { user, hasPermission } = useAuth();
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
     const [selectedStaff, setSelectedStaff] = useState("");
     const [selectedClient, setSelectedClient] = useState("");
     const [filters, setFilters] = useState({});
     const [selectedJob, setSelectedJob] = useState(null);
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState(25);
+    const [searchInput, setSearchInput] = useState("");
+    const search = useDebouncedValue(searchInput.trim());
+    const queryParams = { ...filters, page: page + 1, limit: pageSize, ...(search ? { search } : {}) };
 
-    const userRole = user?.role;
-    const shouldShowButton = Boolean(userRole && userRole !== "staff");
-    const userStaff = userRole === "staff";
+    const canReadUsers = hasPermission("users.read");
+    const canReadClients = hasPermission("clients.read");
+    const canUpdateStatus = hasPermission("jobs.status.update");
+    const canDeleteJobs = hasPermission("jobs.delete");
+    const canRecordClientPayment = hasPermission("clients.payment.record");
+    const userStaff = user?.scope === "staff";
 
     const formatTime = (dateTime) => {
       if (!dateTime) return null;
@@ -40,33 +49,28 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
     };
 
     const jobsQuery = useServiceQuery(
-      ["jobs", "payment-summary", userRole, user?.id, filters],
-      () => userStaff
-        ? jobService.getByStaff(user?.id || "self", filters)
-        : jobService.getAllJobs(filters),
-      { enabled: Boolean(userRole) }
+      ["jobs", "payment-summary", user?.scope, user?.id, queryParams],
+      () => jobService.getAll(queryParams),
+      { enabled: Boolean(user?.scope && hasPermission("jobs.financials.read")) }
     );
-    const staffQuery = useStaff({ enabled: shouldShowButton });
-    const clientsQuery = useClients({ enabled: shouldShowButton });
+    const staffQuery = useActiveEmployees({ enabled: canReadUsers });
+    const clientsQuery = useClients({ enabled: canReadClients });
     const updateJobStatus = useServiceMutation(
       ({ id, status }) => jobService.updateStatus(id, { jobStatus: status }),
       { invalidate: [["jobs"]] }
     );
     const deleteJob = useServiceMutation(jobService.remove, { invalidate: [["jobs"]] });
 
-    const staff = (staffQuery.data?.staffs || []).map((item) => ({ ...item, id: item._id }));
+    const staff = (staffQuery.data?.users || []).map((item) => ({ ...item, id: item._id }));
     const clients = (clientsQuery.data?.clients || []).map((item) => ({ ...item, id: item._id }));
     const data = (jobsQuery.data?.jobs || []).map((item) => ({
       ...item,
       id: item._id,
       jobDate: formatTime(item.jobDate),
     }));
-    const totalPayment = data.reduce((sum, job) => sum + Number(job.orgTotal || 0), 0);
-    const receivedPayment = data.reduce(
-      (sum, job) => sum + (job.receivedPayments || []).reduce((paymentSum, payment) => paymentSum + Number(payment.amount || 0), 0),
-      0
-    );
-    const staffPayment = data.reduce((sum, job) => sum + Number(job.staffPayTotal || 0), 0);
+    const totalPayment = Number(jobsQuery.data?.summary?.totalOrgTotal || 0);
+    const receivedPayment = Number(jobsQuery.data?.summary?.totalReceived || 0);
+    const staffPayment = Number(jobsQuery.data?.summary?.totalStaffPayTotal || 0);
     const profit = totalPayment - staffPayment;
 
     const handlePaymentSaved = (updatedJob) => {
@@ -113,6 +117,7 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
         ...(selectedStaff ? { staffId: selectedStaff } : {}),
         ...(selectedClient ? { clientId: selectedClient } : {}),
       });
+      setPage(0);
     };
 
     const vievAlljobs = () => {
@@ -121,6 +126,7 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
       setSelectedClient("");
       setSelectedStaff("");
       setFilters({});
+      setPage(0);
     };
   let columns =[]
      columns = [
@@ -163,12 +169,11 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
       //   headerName: "Total Payment",
       //   flex: 0.5,
       // },
-      { field: "staffPayTotal", headerName: "Staff Payment", flex: 0.5 },
       {
         field: "jobStatus",
         headerName: "Status",
         flex: 0.6,
-        renderCell: (params) => (
+        renderCell: (params) => canUpdateStatus ? (
           <Select
             value={params.row.jobStatus}
             onChange={(e) => handleStatusChange(params.row.id,e.target.value)}
@@ -177,14 +182,15 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
             <MenuItem value="Completed">Completed</MenuItem>
             <MenuItem value="Cancelled">Cancelled</MenuItem>
           </Select>
-        ),
+        ) : params.row.jobStatus,
       },
       
     ];
 
-    if (shouldShowButton) {
+    if (hasPermission("jobs.financials.read")) {
       columns.splice(6, 0, { field: "orgNoOfhours", headerName: "Original No Hours", flex: 0.5 });
       columns.splice(7, 0, { field: "orgTotal", headerName: "Total Payment", flex: 0.5 });
+      columns.splice(8, 0, { field: "staffPayTotal", headerName: "Staff Payment", flex: 0.5 });
       columns.push(
         {
           field: "receivedAmount",
@@ -274,9 +280,9 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
       />
     </Box>
   </Box>
-  {shouldShowButton && (
+  {(canReadUsers || canReadClients) && (
     <Box  display="flex" justifyContent="flex-start" alignItems="center" gap="10px">
-      <Box>
+      {canReadUsers && <Box>
         <Typography fontWeight="bold" fontSize="16px">Staff</Typography>
         <Select
           fullWidth
@@ -289,8 +295,8 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
             <MenuItem key={staff.id} value={staff.id}>{staff.firstName} {staff.lastName}</MenuItem>
           ))}
         </Select>
-      </Box>
-      <Box>
+      </Box>}
+      {canReadClients && <Box>
         <Typography fontWeight="bold" fontSize="16px">Client</Typography>
         <Select
           fullWidth
@@ -303,7 +309,7 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
             <MenuItem key={client.id} value={client.id}>{client.firstName} {client.lastName}</MenuItem>
           ))}
         </Select>
-      </Box>
+      </Box>}
     </Box>
   )}
   <Button
@@ -355,11 +361,21 @@ import PaymentReceiptDialog from "./PaymentReceiptDialog";
         </Box>
         {jobsQuery.isError && <Alert severity="error" sx={{ mb: 2 }}>{jobsQuery.error.message || "Could not load payment summary."}</Alert>}
         <Box sx={tableSurfaceSx}>
+          <Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, pt: 2 }}>
+            <TextField size="small" label="Search jobs" value={searchInput} onChange={(event) => { setSearchInput(event.target.value); setPage(0); }} sx={{ minWidth: 250 }} />
+          </Box>
           <DataGrid
             rows={data}
             columns={columns}
             components={{ Toolbar: GridToolbar }}
             loading={jobsQuery.isPending}
+            page={page}
+            pageSize={pageSize}
+            rowCount={jobsQuery.data?.paginationInfo?.totalResult || 0}
+            paginationMode="server"
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
           />
         </Box>
         <PaymentReceiptDialog

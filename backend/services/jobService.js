@@ -1,14 +1,16 @@
 import Job from "../models/jobModel.js";
-import Staff from "../models/staffModel.js";
-import Admin from "../models/adminModel.js";
 import Client from "../models/clientModel.js";
 import StaffPayroll from "../models/staffPayrollModel.js";
+import Role from "../models/roleModel.js";
+import User from "../models/userModel.js";
 import mongoose from "mongoose";
-import { adminScope, getAdminProfileId, getStaffProfileId, jobScope } from "./authorizationService.js";
+import { tenantDataScope, getTenantIdForUser, getStaffUserId, jobScope } from "./authorizationService.js";
 
 const serviceResult = (statusCode, body) => ({ statusCode, body });
 
 const jobStatuses = ["InProgress", "Completed", "Cancelled"];
+const isStaffContext = (context) => context.user?.scope === "staff";
+const isPlatformContext = (context) => context.user?.scope === "platform";
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const validId = (value) => mongoose.isValidObjectId(value);
 const PAYROLL_TIMEZONE_OFFSET_MS = 330 * 60 * 1000; // Sri Lanka Standard Time (UTC+05:30).
@@ -19,7 +21,42 @@ const normalizeAssignedStaff = (value) => {
   return staffIds;
 };
 const asList = (value) => Array.isArray(value) ? value : value ? [value] : [];
-const referenceId = (value) => String(value && typeof value === "object" ? value._id || value.staff || value : value || "");
+const referenceId = (value) => String(value && typeof value === "object" ? value._id || value : value || "");
+
+async function employeeRoleIds() {
+  const roles = await Role.find({ scope: { $in: ["tenant", "staff"] } }).select("_id").lean();
+  return roles.map((role) => role._id);
+}
+
+async function employeeAccountFilter(extra = {}, requireActive = false) {
+  return {
+    ...extra,
+    role: { $in: await employeeRoleIds() },
+    isDeleted: false,
+    ...(requireActive ? { status: "active" } : {}),
+  };
+}
+
+async function findEmployeeAccount(id, extra = {}, requireActive = false) {
+  if (!validId(id)) return null;
+  return User.findOne({ _id: id, ...(await employeeAccountFilter(extra, requireActive)) });
+}
+
+async function employeeTenantScope(context) {
+  if (isPlatformContext(context)) return {};
+  const tenantId = await getTenantIdForUser(context.user);
+  return tenantId ? { tenantId } : { _id: { $in: [] } };
+}
+
+async function assignableStaffFilter(context) {
+  const roles = await Role.find({ scope: "staff", isActive: true }).select("_id").lean();
+  return {
+    ...(await employeeTenantScope(context)),
+    role: { $in: roles.map((role) => role._id) },
+    status: "active",
+    isDeleted: false,
+  };
+}
 
 function legacyStaffAssignments(job) {
   const staffMembers = asList(job.assignedStaff);
@@ -204,23 +241,25 @@ function getAssignmentPayrollPaidCents(assignment) {
 
 function presentJob(job, context, staffProfileId = null) {
   const record = job?.toObject ? job.toObject() : { ...job };
-  const assignedStaff = asList(record.assignedStaff);
-  record.assignedStaff = assignedStaff.map((staff) => {
+  const presentAssignedStaff = (staff, includePhoneNumber) => {
     if (!staff || typeof staff !== "object" || !staff._id) return staff;
     return {
       _id: staff._id,
       firstName: staff.firstName,
       lastName: staff.lastName,
-      ...(context.user?.role === "staff" ? {} : { phoneNumber: staff.phoneNumber }),
+      ...(includePhoneNumber ? { phoneNumber: staff.phoneNumber } : {}),
     };
-  });
+  };
+  const assignedStaff = asList(record.assignedStaff);
+  record.assignedStaff = assignedStaff.map((staff) => presentAssignedStaff(staff, !isStaffContext(context)));
   record.staffAssignments = assignmentRows(record).map((assignment) => ({
     ...assignment,
+    staff: presentAssignedStaff(assignment.staff, !isStaffContext(context)),
     payoutBatchTotal: asList(assignment.timeEntries)
       .reduce((sum, entry) => sum + Number(entry.payoutAmount || 0), 0),
   }));
-  if (context.user?.role !== "staff") return record;
-  for (const key of ["adminId", "orgNoOfhours", "orgHourRate", "orgTotal", "staffHourRate", "staffPayTotal", "staffHoursTotal", "staffPaymentTotal", "payment", "paymentStatus", "noOfhours", "hourRate", "receivedPayments"]) {
+  if (!isStaffContext(context)) return record;
+  for (const key of ["tenantId", "orgNoOfhours", "orgHourRate", "orgTotal", "staffHourRate", "staffPayTotal", "staffHoursTotal", "staffPaymentTotal", "payment", "paymentStatus", "noOfhours", "hourRate", "receivedPayments"]) {
     delete record[key];
   }
   if (record.client && typeof record.client === "object") {
@@ -232,7 +271,7 @@ function presentJob(job, context, staffProfileId = null) {
       phoneNumber: record.client.phoneNumber,
     };
   }
-  const currentStaffId = referenceId(staffProfileId || context.user.staffDetails);
+  const currentStaffId = referenceId(staffProfileId || context.user._id);
   const currentAssignment = record.staffAssignments.find((assignment) => referenceId(assignment.staff) === currentStaffId);
   record.currentStaffAssignment = currentAssignment ? {
     signInTime: currentAssignment.signInTime,
@@ -291,12 +330,14 @@ async function attachPayrollProjection(presentedJobs) {
   }
   return presentedJobs;
 }
-const populatedJobs = (query, context) => context.user.role === "staff"
-  ? query.populate("assignedStaff", "firstName lastName")
-    .populate("staffAssignments.staff", "firstName lastName")
+const populateStaffNames = (query, includePhoneNumber) => query
+  .populate("assignedStaff", `_id firstName lastName${includePhoneNumber ? " phoneNumber" : ""}`)
+  .populate("staffAssignments.staff", "_id firstName lastName");
+
+const populatedJobs = (query, context) => isStaffContext(context)
+  ? populateStaffNames(query, false)
     .populate("client", "firstName lastName address phoneNumber")
-  : query.populate("assignedStaff", "firstName lastName phoneNumber")
-    .populate("staffAssignments.staff", "firstName lastName")
+  : populateStaffNames(query, true)
     .populate("client");
 
 const dateBounds = (startDate, endDate) => {
@@ -308,10 +349,6 @@ const dateBounds = (startDate, endDate) => {
   end.setHours(23, 59, 59, 999);
   return { $gte: start, $lte: end };
 };
-
-function tenantIdsForWrite(context, adminId) {
-  return [adminId, context.user._id];
-}
 
 export const addJob = async (context) => {
   const {
@@ -331,15 +368,16 @@ export const addJob = async (context) => {
     const staffRateMap = normalizeStaffRates(staffRates, assignedStaffIds, staffHourRate);
     if (!staffRateMap) return serviceResult(400, { message: "Enter a valid non-negative hourly rate for each assigned staff member" });
 
-    const adminId = await getAdminProfileId(context.user);
-    if (!adminId) return serviceResult(403, { message: "An admin profile is required to create jobs" });
-    const ownerScope = { adminId: { $in: tenantIdsForWrite(context, adminId) } };
+    const tenantId = await getTenantIdForUser(context.user);
+    if (!tenantId) return serviceResult(403, { message: "A tenant account is required to create jobs" });
+    const ownerScope = await tenantDataScope(context);
+    const staffFilter = await assignableStaffFilter(context);
     const [client, staffMembers] = await Promise.all([
-      Client.findOne({ _id: clientId, ...ownerScope }).select("_id"),
-      Staff.find({ _id: { $in: assignedStaffIds }, ...ownerScope }).select("_id"),
+      Client.findOne({ _id: clientId, ...ownerScope }).select("_id tenantId"),
+      User.find({ _id: { $in: assignedStaffIds }, ...staffFilter }).select("_id"),
     ]);
     if (!client) return serviceResult(404, { message: "Client not found in this account" });
-    if (staffMembers.length !== assignedStaffIds.length) return serviceResult(404, { message: "One or more assigned staff members were not found in this account" });
+    if (staffMembers.length !== assignedStaffIds.length) return serviceResult(400, { message: "Only active Staff accounts within your access scope can be assigned to a job" });
 
     const orgTotal = Number(orgNoOfhours || 0) * Number(orgHourRate || 0);
     const staffAssignments = assignedStaffIds.map((staffId) => createStaffAssignment(staffId, estNoOfhours, staffRateMap.get(String(staffId))));
@@ -347,7 +385,7 @@ export const addJob = async (context) => {
     const job = await Job.create({
       jobName: jobName.trim(), description: description.trim(), client: clientId, assignedStaff: assignedStaffIds,
       staffAssignments, orgNoOfhours, orgHourRate, orgTotal, estNoOfhours, staffHourRate, staffPayTotal, payment: 0,
-      notes, adminId, jobDate,
+      notes, tenantId: client.tenantId, jobDate,
     });
     return serviceResult(201, { response_code: 201, success: true, message: "Job added successfully", job });
   } catch (error) {
@@ -387,15 +425,15 @@ export const updatedJob = async (context) => {
     }
 
     if (clientId !== undefined || assignedStaff !== undefined) {
-      const ownerIds = [job.adminId, context.user.adminDetails, context.user._id].filter(Boolean);
-      const ownerScope = { adminId: { $in: ownerIds } };
+      const ownerIds = [job.tenantId, context.user.tenantId, context.user._id].filter(Boolean);
+      const ownerScope = isPlatformContext(context) ? {} : { tenantId: { $in: ownerIds } };
       if (clientId !== undefined && (!validId(clientId) || !(await Client.exists({ _id: clientId, ...ownerScope })))) {
         return serviceResult(400, { message: "Client must belong to this account" });
       }
       if (assignedStaffIds !== undefined) {
-        const staffMembers = await Staff.find({ _id: { $in: assignedStaffIds }, ...ownerScope }).select("_id");
+        const staffMembers = await User.find({ _id: { $in: assignedStaffIds }, ...(await assignableStaffFilter(context)) }).select("_id");
         if (staffMembers.length !== assignedStaffIds.length) {
-          return serviceResult(400, { message: "Every assigned staff member must belong to this account" });
+          return serviceResult(400, { message: "Only active Staff accounts within your access scope can be assigned to a job" });
         }
         const selectedIds = new Set(assignedStaffIds.map(String));
         const payoutHistoryRemoval = ensureStaffAssignments(job).some((assignment) =>
@@ -434,7 +472,7 @@ export const updatedJob = async (context) => {
 };
 
 export const deleteJobById = async (context) => {
-  const scope = await adminScope(context);
+  const scope = await tenantDataScope(context);
   const hasPayrollHistory = await StaffPayroll.exists({ "entries.jobId": context.params.id, ...scope });
   if (hasPayrollHistory) return serviceResult(409, { message: "Jobs with recorded staff payroll cannot be deleted" });
   const deletedJob = await Job.findOneAndDelete({
@@ -477,11 +515,11 @@ export const getAllJobs = async (context) => {
     const filter = { ...(await jobScope(context)) };
     const dates = dateBounds(startDate, endDate);
     if (dates) filter.jobDate = dates;
-    if (context.user.role !== "staff" && staffId) {
+    if (!isStaffContext(context) && staffId) {
       if (!validId(staffId)) return serviceResult(400, { message: "Invalid staff id" });
       filter.assignedStaff = staffId;
     }
-    if (context.user.role !== "staff" && clientId) {
+    if (!isStaffContext(context) && clientId) {
       if (!validId(clientId)) return serviceResult(400, { message: "Invalid client id" });
       filter.client = clientId;
     }
@@ -500,7 +538,7 @@ export const getAllJobsCount = async (context) => {
 export const getTotalAndProfit = async (context) => {
   try {
     const result = await Job.aggregate([
-      { $match: await adminScope(context) },
+      { $match: await jobScope(context) },
       { $group: {
         _id: null,
         totalOrgTotal: { $sum: "$orgTotal" },
@@ -516,17 +554,48 @@ export const getTotalAndProfit = async (context) => {
 };
 
 export const getAllJobPagination = async (context) => {
-  const { page: rawPage, limit: rawLimit, search: rawSearch = "" } = context.query;
+  const { page: rawPage, limit: rawLimit, search: rawSearch = "", startDate, endDate, staffId, clientId, jobStatus } = context.query;
   if (rawSearch !== "" && typeof rawSearch !== "string") return serviceResult(400, { message: "Invalid search" });
   const page = parsePage(rawPage, 1, Number.MAX_SAFE_INTEGER);
-  const limit = parsePage(rawLimit, 10, 100);
+  const limit = parsePage(rawLimit, 25, 100);
   const search = rawSearch.trim().slice(0, 100);
-  const searchFilter = search ? { $or: ["jobName", "description", "notes"].map((field) => ({ [field]: { $regex: escapeRegex(search), $options: "i" } })) } : {};
-  const query = { ...(await jobScope(context)), ...searchFilter };
   try {
-    const [totalResult, jobs] = await Promise.all([
+    const conditions = [await jobScope(context)];
+    const dates = dateBounds(startDate, endDate);
+    if (dates) conditions.push({ jobDate: dates });
+    if (jobStatus) {
+      if (!jobStatuses.includes(jobStatus)) return serviceResult(400, { message: "Invalid job status" });
+      conditions.push({ jobStatus });
+    }
+    if (staffId) {
+      if (!validId(staffId)) return serviceResult(400, { message: "Invalid staff id" });
+      const employeeId = new mongoose.Types.ObjectId(staffId);
+      conditions.push({ $or: [{ assignedStaff: employeeId }, { "staffAssignments.staff": employeeId }] });
+    }
+    if (clientId) {
+      if (!validId(clientId)) return serviceResult(400, { message: "Invalid client id" });
+      conditions.push({ client: new mongoose.Types.ObjectId(clientId) });
+    }
+    if (search) {
+      const regex = { $regex: escapeRegex(search), $options: "i" };
+      conditions.push({ $or: ["jobName", "description", "notes"].map((field) => ({ [field]: regex })) });
+    }
+    const query = conditions.length > 1 ? { $and: conditions } : conditions[0];
+    const [totalResult, jobs, summary] = await Promise.all([
       Job.countDocuments(query),
-      populatedJobs(Job.find(query).skip((page - 1) * limit).sort({ createdAt: -1 }).limit(limit), context),
+      populatedJobs(Job.find(query).skip((page - 1) * limit).sort({ createdAt: -1, _id: -1 }).limit(limit), context),
+      context.user?.permissions?.includes("jobs.financials.read") ? Job.aggregate([
+        { $match: query },
+        { $group: {
+          _id: null,
+          totalOrgTotal: { $sum: { $ifNull: ["$orgTotal", 0] } },
+          totalStaffPayTotal: { $sum: { $ifNull: ["$staffPayTotal", 0] } },
+          totalReceived: { $sum: { $reduce: {
+            input: { $ifNull: ["$receivedPayments", []] }, initialValue: 0,
+            in: { $add: ["$$value", { $ifNull: ["$$this.amount", 0] }] },
+          } } },
+        } },
+      ]) : Promise.resolve([]),
     ]);
     return serviceResult(200, {
       response_code: 200,
@@ -534,6 +603,9 @@ export const getAllJobPagination = async (context) => {
       message: "Jobs fetched successfully",
       jobs: presentJobs(jobs, context),
       paginationInfo: { totalPages: Math.ceil(totalResult / limit), currentPage: page, totalResult, pageSize: limit },
+      ...(context.user?.permissions?.includes("jobs.financials.read")
+        ? { summary: summary[0] || { totalOrgTotal: 0, totalStaffPayTotal: 0, totalReceived: 0 } }
+        : {}),
     });
   } catch (error) {
     return serviceResult(400, { response_code: 400, success: false, error: error.message });
@@ -544,7 +616,7 @@ export const updateStatus = async (context) => {
   const { jobStatus } = context.body || {};
   if (!jobStatuses.includes(jobStatus)) return serviceResult(400, { message: "Invalid job status" });
   const job = await Job.findOneAndUpdate(
-    { _id: context.params.id, ...(await adminScope(context)) },
+    { _id: context.params.id, ...(await jobScope(context)) },
     { $set: { jobStatus } },
     { new: true, runValidators: true }
   );
@@ -553,8 +625,24 @@ export const updateStatus = async (context) => {
 };
 
 export const getAllCompletedJobs = async (context) => {
-  const jobs = await populatedJobs(Job.find({ ...(await adminScope(context)), jobStatus: "Completed" }).sort({ jobDate: -1 }), context);
-  return serviceResult(200, { response_code: 200, success: true, message: "Completed jobs fetched successfully", jobs: presentJobs(jobs, context) });
+  const page = parsePage(context.query.page, 1, Number.MAX_SAFE_INTEGER);
+  const limit = parsePage(context.query.limit, 25, 100);
+  const search = typeof context.query.search === "string" ? context.query.search.trim().slice(0, 100) : "";
+  const conditions = [await jobScope(context), { jobStatus: "Completed" }];
+  if (search) {
+    const regex = { $regex: escapeRegex(search), $options: "i" };
+    conditions.push({ $or: ["jobName", "description", "notes"].map((field) => ({ [field]: regex })) });
+  }
+  const query = { $and: conditions };
+  const [totalResult, jobs] = await Promise.all([
+    Job.countDocuments(query),
+    populatedJobs(Job.find(query).sort({ jobDate: -1, _id: -1 }).skip((page - 1) * limit).limit(limit), context),
+  ]);
+  return serviceResult(200, {
+    response_code: 200, success: true, message: "Completed jobs fetched successfully",
+    jobs: presentJobs(jobs, context),
+    paginationInfo: { totalResult, totalPages: Math.ceil(totalResult / limit), currentPage: page, pageSize: limit },
+  });
 };
 
 export const signInJob = async (context) => {
@@ -565,8 +653,11 @@ export const signInJob = async (context) => {
   try {
     const job = await Job.findOne({ _id: context.params.jobId, ...(await jobScope(context)) });
     if (!job) return serviceResult(404, { message: "Job not found" });
-    targetStaffId = context.user.role === "staff" ? await getStaffProfileId(context.user) : staffId;
+    targetStaffId = isStaffContext(context) ? await getStaffUserId(context.user) : staffId;
     if (!validId(targetStaffId)) return serviceResult(400, { message: "A valid assigned staff member is required" });
+    if (context.user.scope === "tenant" && !(await findEmployeeAccount(targetStaffId, await employeeTenantScope(context)))) {
+      return serviceResult(403, { message: "You can only manage attendance for staff under your supervision" });
+    }
     const assignment = ensureStaffAssignments(job).find((item) =>
       referenceId(item.staff) === String(targetStaffId) && item.isAssigned !== false
     );
@@ -591,8 +682,8 @@ export const signInJob = async (context) => {
       return serviceResult(409, { message: "You are already signed in to another task. Sign out before starting a new one." });
     }
 
-    const claimedStaff = await Staff.findOneAndUpdate(
-      { _id: targetStaffId, activeJob: null },
+    const claimedStaff = await User.findOneAndUpdate(
+      { _id: targetStaffId, activeJob: null, ...(await employeeAccountFilter({}, true)) },
       { $set: { activeJob: job._id } },
       { new: true, projection: { _id: 1 } }
     );
@@ -615,7 +706,7 @@ export const signInJob = async (context) => {
     return serviceResult(200, { response_code: 200, success: true, message: "Staff signed in successfully", job: presentJob(job, context), data: presentJob(job, context) });
   } catch (error) {
     if (activeJobClaimed && !attendanceSaved) {
-      await Staff.updateOne({ _id: targetStaffId, activeJob: context.params.jobId }, { $set: { activeJob: null } }).catch(() => {});
+      await User.updateOne({ _id: targetStaffId, activeJob: context.params.jobId }, { $set: { activeJob: null } }).catch(() => {});
     }
     const status = error.name === "VersionError" ? 409 : 400;
     return serviceResult(status, { response_code: status, success: false, message: status === 409 ? "This job changed during the update. Refresh and try again." : error.message });
@@ -630,8 +721,11 @@ export const signOffJob = async (context) => {
   try {
     const job = await Job.findOne({ _id: context.params.jobId, ...(await jobScope(context)) });
     if (!job) return serviceResult(404, { message: "Job not found" });
-    const targetStaffId = context.user.role === "staff" ? await getStaffProfileId(context.user) : staffId;
+    const targetStaffId = isStaffContext(context) ? await getStaffUserId(context.user) : staffId;
     if (!validId(targetStaffId)) return serviceResult(400, { message: "A valid assigned staff member is required" });
+    if (context.user.scope === "tenant" && !(await findEmployeeAccount(targetStaffId, await employeeTenantScope(context)))) {
+      return serviceResult(403, { message: "You can only manage attendance for staff under your supervision" });
+    }
     const assignment = ensureStaffAssignments(job).find((item) =>
       referenceId(item.staff) === String(targetStaffId) && item.isAssigned !== false
     );
@@ -655,7 +749,7 @@ export const signOffJob = async (context) => {
     refreshJobTotals(job);
     refreshAttendanceSummary(job);
     await job.save();
-    await Staff.updateOne({ _id: targetStaffId, activeJob: job._id }, { $set: { activeJob: null } });
+    await User.updateOne({ _id: targetStaffId, activeJob: job._id }, { $set: { activeJob: null } });
     return serviceResult(200, { response_code: 200, success: true, message: "Staff signed off successfully", job: presentJob(job, context), data: presentJob(job, context) });
   } catch (error) {
     const status = error.name === "VersionError" ? 409 : 400;
@@ -679,29 +773,30 @@ export const getTimesheets = async (context) => {
     let staffScope = null;
     let allowedStaffIds = null;
     let supervisorOwnerIds = null;
-    if (context.user.role === "staff") {
-      staffScope = String(await getStaffProfileId(context.user) || "");
+    if (isStaffContext(context)) {
+      staffScope = String(await getStaffUserId(context.user) || "");
       if (!validId(staffScope)) return serviceResult(403, { message: "A staff profile is required" });
       allowedStaffIds = new Set([staffScope]);
-    } else if (context.user.role === "admin") {
-      const ownAdminId = String(await getAdminProfileId(context.user) || "");
-      if (context.query.supervisorId !== undefined && String(context.query.supervisorId) !== ownAdminId) {
+    } else if (context.user.scope === "tenant") {
+      const ownTenantId = String(await getTenantIdForUser(context.user) || "");
+      if (context.query.supervisorId !== undefined && String(context.query.supervisorId) !== ownTenantId) {
         return serviceResult(404, { message: "Supervisor not found in your access scope" });
       }
-      const ownedStaff = await Staff.find(await adminScope(context)).select("_id firstName lastName").lean();
-      allowedStaffIds = new Set(ownedStaff.map((staff) => String(staff._id)));
+      const tenantId = await getTenantIdForUser(context.user);
+      const ownedStaff = await User.find(await employeeAccountFilter({ tenantId })).select("_id").lean();
+      allowedStaffIds = new Set(ownedStaff.map((employee) => String(employee._id)));
     } else if (context.query.supervisorId !== undefined) {
       if (!validId(context.query.supervisorId)) return serviceResult(404, { message: "Supervisor not found" });
-      const supervisor = await Admin.findOne({
-        $or: [{ _id: context.query.supervisorId }, { user: context.query.supervisorId }],
-      }).select("_id user");
-      if (!supervisor) return serviceResult(404, { message: "Supervisor not found" });
-      supervisorOwnerIds = [supervisor._id, supervisor.user].filter(Boolean).map(String);
-      const supervisedStaff = await Staff.find({ adminId: { $in: supervisorOwnerIds } }).select("_id").lean();
-      allowedStaffIds = new Set(supervisedStaff.map((staff) => String(staff._id)));
+      const supervisor = await User.findOne({ _id: context.query.supervisorId, status: "active", isDeleted: false })
+        .populate("role", "scope")
+        .select("_id role");
+      if (supervisor?.role?.scope !== "tenant") return serviceResult(404, { message: "Supervisor not found" });
+      supervisorOwnerIds = [String(supervisor._id)];
+      const supervisedStaff = await User.find(await employeeAccountFilter({ tenantId: { $in: supervisorOwnerIds } })).select("_id").lean();
+      allowedStaffIds = new Set(supervisedStaff.map((employee) => String(employee._id)));
     }
-    if (context.user.role !== "staff" && context.query.staffId !== undefined) {
-      if (!validId(context.query.staffId) || !(await Staff.exists({ _id: context.query.staffId }))) {
+    if (!isStaffContext(context) && context.query.staffId !== undefined) {
+      if (!validId(context.query.staffId) || !(await findEmployeeAccount(context.query.staffId, await employeeTenantScope(context)))) {
         return serviceResult(404, { message: "Staff member not found" });
       }
       if (allowedStaffIds && !allowedStaffIds.has(String(context.query.staffId))) {
@@ -710,10 +805,13 @@ export const getTimesheets = async (context) => {
       staffScope = String(context.query.staffId);
     }
 
-    const jobFilters = [];
-    if (context.user.role === "admin") jobFilters.push(await adminScope(context));
-    if (context.user.role === "superAdmin" && supervisorOwnerIds) {
-      jobFilters.push({ adminId: { $in: supervisorOwnerIds } });
+    const jobFilters = [await jobScope(context)];
+    if (isPlatformContext(context) && supervisorOwnerIds) {
+      const supervisedStaffIds = [...allowedStaffIds].map((id) => new mongoose.Types.ObjectId(id));
+      jobFilters.push({ $or: [
+        { assignedStaff: { $in: supervisedStaffIds } },
+        { "staffAssignments.staff": { $in: supervisedStaffIds } },
+      ] });
     }
     if (staffScope) {
       jobFilters.push({
@@ -724,11 +822,10 @@ export const getTimesheets = async (context) => {
       });
     }
     const jobQuery = jobFilters.length > 1 ? { $and: jobFilters } : jobFilters[0] || {};
-    const jobs = await Job.find(jobQuery)
+    const jobs = await populateStaffNames(Job.find(jobQuery)
       .select("jobName jobDate assignedStaff staffAssignments signInTime signOffTime isSignIn isSignOff noOfhours estNoOfhours staffHourRate staffPayTotal payment paymentStatus")
-      .populate("assignedStaff", "firstName lastName")
-      .populate("staffAssignments.staff", "firstName lastName")
-      .sort({ jobDate: -1, createdAt: -1 });
+      .sort({ jobDate: -1, createdAt: -1 }), true)
+      .populate("client", "firstName lastName");
 
     const timesheets = [];
     for (const job of jobs) {
@@ -773,9 +870,8 @@ export const getTimesheets = async (context) => {
 };
 
 export const getInvoice = async (context) => {
-  const job = await Job.findOne({ _id: context.params.jobId, ...(await adminScope(context)) })
-    .populate("client", "firstName lastName")
-    .populate("assignedStaff", "firstName lastName");
+  const job = await populateStaffNames(Job.findOne({ _id: context.params.jobId, ...(await tenantDataScope(context)) }), true)
+    .populate("client", "firstName lastName");
   if (!job) return serviceResult(404, { message: "Job not found" });
   if (job.jobStatus !== "Completed") return serviceResult(400, { message: "Job is not completed yet" });
   const invoice = {
@@ -799,21 +895,20 @@ export const getInvoice = async (context) => {
 
 export const getJobsByStaffId = async (context) => {
   try {
-    let staff;
-    if (context.user.role === "staff") {
-      staff = await Staff.findOne({ user: context.user._id }).select("_id");
+    let employee;
+    if (isStaffContext(context)) {
+      employee = await findEmployeeAccount(context.user._id);
     } else {
       const id = context.params.staffId;
       if (!validId(id)) return serviceResult(400, { message: "Invalid staff id" });
-      const scope = await adminScope(context);
-      staff = await Staff.findOne({ user: id, ...scope }).select("_id") || await Staff.findOne({ _id: id, ...scope }).select("_id");
+      employee = await findEmployeeAccount(id, await employeeTenantScope(context));
     }
-    if (!staff) return serviceResult(404, { message: "Staff member not found" });
-    const filter = { ...(await jobScope(context)), assignedStaff: staff._id };
+    if (!employee) return serviceResult(404, { message: "User account not found" });
+    const filter = { ...(await jobScope(context)), assignedStaff: employee._id };
     const dates = dateBounds(context.query.startDate, context.query.endDate);
     if (dates) filter.jobDate = dates;
     const jobs = await populatedJobs(Job.find(filter).sort({ jobDate: -1 }), context);
-    const presentedJobs = await attachPayrollProjection(presentJobs(jobs, context, staff._id));
+    const presentedJobs = await attachPayrollProjection(presentJobs(jobs, context, employee._id));
     return serviceResult(200, { response_code: 200, success: true, message: "Jobs fetched successfully", jobs: presentedJobs });
   } catch (error) {
     return serviceResult(400, { response_code: 400, success: false, error: error.message });
@@ -822,13 +917,21 @@ export const getJobsByStaffId = async (context) => {
 
 export const getFilteredJobs = async (context) => {
   const { clientId } = context.params;
-  const { jobStatus, minPayment, maxPayment, month, year, startDate, endDate } = context.query;
+  const { jobStatus, minPayment, maxPayment, month, year, startDate, endDate, search: rawSearch = "" } = context.query;
+  const page = parsePage(context.query.page, 1, Number.MAX_SAFE_INTEGER);
+  const limit = parsePage(context.query.limit, 25, 100);
   if (!validId(clientId)) return serviceResult(400, { message: "Invalid client id" });
   if (jobStatus && !jobStatuses.includes(jobStatus)) return serviceResult(400, { message: "Invalid job status" });
   try {
-    const client = await Client.findOne({ _id: clientId, ...(await adminScope(context)) }).select("_id");
+    const client = await Client.findOne({ _id: clientId, ...(await tenantDataScope(context)) }).select("_id");
     if (!client) return serviceResult(404, { message: "Client not found" });
-    const query = { ...(await adminScope(context)), client: client._id };
+    const query = { $and: [await jobScope(context), { client: client._id }] };
+    if (typeof rawSearch !== "string") return serviceResult(400, { message: "Invalid search" });
+    const search = rawSearch.trim().slice(0, 100);
+    if (search) {
+      const regex = { $regex: escapeRegex(search), $options: "i" };
+      query.$or = ["jobName", "description", "notes"].map((field) => ({ [field]: regex }));
+    }
     if (jobStatus) query.jobStatus = jobStatus;
     const numericMin = minPayment === undefined ? undefined : Number(minPayment);
     const numericMax = maxPayment === undefined ? undefined : Number(maxPayment);
@@ -854,9 +957,16 @@ export const getFilteredJobs = async (context) => {
     }
     const dates = dateBounds(startDate, endDate);
     if (dates) query.jobDate = dates;
-    const jobs = await populatedJobs(Job.find(query).sort({ jobDate: -1 }), context);
-    const totalPayment = jobs.reduce((sum, job) => sum + (job.payment || 0), 0);
-    return serviceResult(200, { response_code: 200, success: true, total: jobs.length, totalPayment, jobs: presentJobs(jobs, context) });
+    const [total, totalPaymentResult, jobs] = await Promise.all([
+      Job.countDocuments(query),
+      Job.aggregate([{ $match: query }, { $group: { _id: null, totalPayment: { $sum: { $ifNull: ["$payment", 0] } } } }]),
+      populatedJobs(Job.find(query).sort({ jobDate: -1, _id: -1 }).skip((page - 1) * limit).limit(limit), context),
+    ]);
+    return serviceResult(200, {
+      response_code: 200, success: true, total, totalPayment: totalPaymentResult[0]?.totalPayment || 0,
+      jobs: presentJobs(jobs, context),
+      paginationInfo: { totalResult: total, totalPages: Math.ceil(total / limit), currentPage: page, pageSize: limit },
+    });
   } catch (error) {
     return serviceResult(400, { response_code: 400, success: false, error: error.message });
   }
@@ -866,29 +976,47 @@ export const getStaffJobsbyId = async (context) => {
   const { assignedStaff } = context.params;
   const { jobStatus, startDate, endDate } = context.query;
   if (!validId(assignedStaff)) return serviceResult(400, { message: "Invalid staff id" });
+  if (isStaffContext(context) && String(assignedStaff) !== String(context.user._id)) {
+    return serviceResult(403, { message: "You can only view your own payment history" });
+  }
   if (jobStatus && !jobStatuses.includes(jobStatus)) return serviceResult(400, { message: "Invalid job status" });
+  const page = parsePage(context.query.page, 1, Number.MAX_SAFE_INTEGER);
+  const limit = parsePage(context.query.limit, 25, 100);
   try {
-    const staff = await Staff.findOne({ _id: assignedStaff, ...(await adminScope(context)) }).select("_id");
-    if (!staff) return serviceResult(404, { message: "Staff member not found" });
-    const query = {
-      ...(await adminScope(context)),
-      $or: [
-        { assignedStaff: staff._id },
-        { staffAssignments: { $elemMatch: { staff: staff._id } } },
-      ],
-    };
+    const employee = await findEmployeeAccount(assignedStaff, await employeeTenantScope(context));
+    if (!employee) return serviceResult(404, { message: "User account not found" });
+    const query = { $and: [
+      await jobScope(context),
+      { $or: [
+        { assignedStaff: employee._id },
+        { staffAssignments: { $elemMatch: { staff: employee._id } } },
+      ] },
+    ] };
     if (jobStatus) query.jobStatus = jobStatus;
     const dates = dateBounds(startDate, endDate);
     if (dates) query.jobDate = dates;
-    const jobs = await populatedJobs(Job.find(query).sort({ jobDate: -1 }), context);
+    const [total, jobs, paymentSummary] = await Promise.all([
+      Job.countDocuments(query),
+      populatedJobs(Job.find(query).sort({ jobDate: -1, _id: -1 }).skip((page - 1) * limit).limit(limit), context),
+      Job.aggregate([
+        { $match: query },
+        { $unwind: "$staffAssignments" },
+        { $match: { "staffAssignments.staff": employee._id, "staffAssignments.isAssigned": { $ne: false } } },
+        { $group: { _id: null, totalPayment: { $sum: { $ifNull: ["$staffAssignments.payment", 0] } } } },
+      ]),
+    ]);
     const presentedJobs = jobs.map((job) => {
       const presented = presentJob(job, context);
-      presented.staffAssignment = presented.staffAssignments.find((assignment) => referenceId(assignment.staff) === String(staff._id)) || null;
+      presented.staffAssignment = isStaffContext(context)
+        ? presented.currentStaffAssignment
+        : presented.staffAssignments.find((assignment) => referenceId(assignment.staff) === String(employee._id)) || null;
       return presented;
     });
     await attachPayrollProjection(presentedJobs);
-    const totalPayment = presentedJobs.reduce((sum, job) => sum + Number(job.staffAssignment?.payment || 0), 0);
-    return serviceResult(200, { response_code: 200, success: true, total: jobs.length, totalPayment, jobs: presentedJobs });
+    return serviceResult(200, {
+      response_code: 200, success: true, total, totalPayment: paymentSummary[0]?.totalPayment || 0, jobs: presentedJobs,
+      paginationInfo: { totalResult: total, totalPages: Math.ceil(total / limit), currentPage: page, pageSize: limit },
+    });
   } catch (error) {
     return serviceResult(400, { response_code: 400, success: false, error: error.message });
   }
@@ -912,7 +1040,7 @@ export const recordClientPayment = async (context) => {
   }
 
   try {
-    const scope = await adminScope(context);
+    const scope = await tenantDataScope(context);
     const job = await Job.findOne({ _id: context.params.jobId, ...scope });
     if (!job) return serviceResult(404, { message: "Job not found" });
     const client = await Client.findOne({ _id: job.client, ...scope }).select("firstName lastName email address phoneNumber");
@@ -972,13 +1100,11 @@ export const recordStaffPayout = async (context) => {
   if (typeof legacyReceiptOnly !== "boolean") return serviceResult(400, { message: "Invalid legacy receipt flag" });
 
   try {
-    const scope = await adminScope(context);
+    const scope = await tenantDataScope(context);
     const job = await Job.findOne({ _id: context.params.jobId, ...scope });
     if (!job) return serviceResult(404, { message: "Job not found" });
-    const staff = await Staff.findOne({ _id: context.params.staffId, ...scope })
-      .select("firstName lastName phoneNumber user")
-      .populate("user", "email");
-    if (!staff) return serviceResult(404, { message: "Staff member not found" });
+    const staff = await findEmployeeAccount(context.params.staffId, await employeeTenantScope(context));
+    if (!staff) return serviceResult(404, { message: "User account not found" });
 
     const assignment = ensureStaffAssignments(job).find((item) => referenceId(item.staff) === String(staff._id));
     if (!assignment) return serviceResult(404, { message: "Staff member is not assigned to this job" });
@@ -1013,7 +1139,7 @@ export const recordStaffPayout = async (context) => {
       referenceNumber: referenceNumber.trim(),
       recordedBy: context.user._id,
       payeeName: [staff.firstName, staff.lastName].filter(Boolean).join(" "),
-      payeeEmail: staff.user?.email || "",
+      payeeEmail: staff.email || "",
       payeePhoneNumber: staff.phoneNumber || "",
       jobName: job.jobName || "",
       jobDate: job.jobDate,
@@ -1042,11 +1168,11 @@ export const recordStaffPayout = async (context) => {
 };
 
 async function findPayrollStaff(context) {
-  const query = context.user.role === "staff"
-    ? { _id: await getStaffProfileId(context.user) }
-    : { _id: context.params.staffId, ...(await adminScope(context)) };
+  const query = isStaffContext(context)
+    ? { _id: await getStaffUserId(context.user) }
+    : { _id: context.params.staffId, ...(await employeeTenantScope(context)) };
   if (!query._id || !validId(query._id)) return null;
-  return Staff.findOne(query).select("firstName lastName phoneNumber payFrequency adminId user").populate("user", "email");
+  return findEmployeeAccount(query._id, Object.fromEntries(Object.entries(query).filter(([key]) => key !== "_id")));
 }
 
 function payrollPeriodFromRequest(context, staff) {
@@ -1060,13 +1186,10 @@ function payrollPeriodFromRequest(context, staff) {
 }
 
 async function buildStaffPayrollPreview(staff, periodStart, periodEnd, scope) {
-  const query = Job.find({
-    ...scope,
-    $or: [
+  const query = Job.find({ $and: [scope, { $or: [
       { assignedStaff: staff._id },
       { staffAssignments: { $elemMatch: { staff: staff._id } } },
-    ],
-  }).select("jobName jobDate assignedStaff staffAssignments");
+    ] }] }).select("jobName jobDate assignedStaff staffAssignments");
   const [jobs, priorPayouts] = await Promise.all([
     query,
     StaffPayroll.find({ staff: staff._id }).select("entries").lean(),
@@ -1137,7 +1260,7 @@ async function buildStaffPayrollPreview(staff, periodStart, periodEnd, scope) {
 }
 
 export const getStaffPayroll = async (context) => {
-  if (context.user.role !== "staff" && !validId(context.params.staffId)) {
+  if (!isStaffContext(context) && !validId(context.params.staffId)) {
     return serviceResult(400, { message: "Invalid staff id" });
   }
   try {
@@ -1145,17 +1268,21 @@ export const getStaffPayroll = async (context) => {
     if (!staff) return serviceResult(404, { message: "Staff member not found" });
     const period = payrollPeriodFromRequest(context, staff);
     if (!period) return serviceResult(400, { message: "Enter a valid payroll start and end date within a 12 month range" });
-    const scope = context.user.role === "staff" ? {} : await adminScope(context);
-    const [preview, payouts] = await Promise.all([
+    const scope = await jobScope(context);
+    const payoutPage = parsePage(context.query.payoutPage, 1, Number.MAX_SAFE_INTEGER);
+    const payoutLimit = parsePage(context.query.payoutLimit, 25, 100);
+    const [preview, payoutTotal, payouts] = await Promise.all([
       buildStaffPayrollPreview(staff, period.periodStart, period.periodEnd, scope),
-      StaffPayroll.find({ staff: staff._id }).select("-adminId -recordedBy").sort({ paymentDate: -1, createdAt: -1 }).limit(100).lean(),
+      StaffPayroll.countDocuments({ staff: staff._id }),
+      StaffPayroll.find({ staff: staff._id }).select("-tenantId -recordedBy")
+        .sort({ paymentDate: -1, createdAt: -1 }).skip((payoutPage - 1) * payoutLimit).limit(payoutLimit).lean(),
     ]);
     return serviceResult(200, {
       success: true,
       staff: {
         _id: staff._id,
-        name: [staff.firstName, staff.lastName].filter(Boolean).join(" ") || "Staff member",
-        email: staff.user?.email || "",
+        name: [staff.firstName, staff.lastName].filter(Boolean).join(" ") || "User",
+        email: staff.email || "",
         phoneNumber: staff.phoneNumber || "",
         payFrequency: staff.payFrequency || "Weekly",
       },
@@ -1170,6 +1297,12 @@ export const getStaffPayroll = async (context) => {
         ...payout,
         entries: asList(payout.entries).map(({ jobId, timeEntryIndex, receiptCreditApplied, ...entry }) => entry),
       })),
+      payoutPaginationInfo: {
+        totalResult: payoutTotal,
+        totalPages: Math.ceil(payoutTotal / payoutLimit),
+        currentPage: payoutPage,
+        pageSize: payoutLimit,
+      },
     });
   } catch (error) {
     return serviceResult(400, { message: error.message });
@@ -1194,7 +1327,7 @@ export const recordStaffPayroll = async (context) => {
   try {
     const staff = await findPayrollStaff(context);
     if (!staff) return serviceResult(404, { message: "Staff member not found" });
-    const scope = await adminScope(context);
+    const scope = await jobScope(context);
     const preview = await buildStaffPayrollPreview(staff, periodStart, periodEnd, scope);
     if (!preview.entries.length || preview.totalAmount <= 0) {
       return serviceResult(409, { message: "There is no unpaid completed work in this period" });
@@ -1202,9 +1335,9 @@ export const recordStaffPayroll = async (context) => {
 
     const payout = new StaffPayroll({
       staff: staff._id,
-      adminId: staff.adminId,
-      payeeName: [staff.firstName, staff.lastName].filter(Boolean).join(" ") || "Staff member",
-      payeeEmail: staff.user?.email || "",
+      tenantId: staff.tenantId,
+      payeeName: [staff.firstName, staff.lastName].filter(Boolean).join(" ") || "User",
+      payeeEmail: staff.email || "",
       payeePhoneNumber: staff.phoneNumber || "",
       payFrequency: staff.payFrequency || "Weekly",
       periodStart,

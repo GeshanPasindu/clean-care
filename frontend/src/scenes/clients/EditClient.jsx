@@ -79,7 +79,7 @@ const EditClient = () => {
           <Grid container spacing={2}>
             {Object.entries(clientDetails).map(([field]) => (
               <React.Fragment key={field}>
-                {field !== 'createdAt' && field !== 'clientStatus' && field !== '__v' && field !== '_id' && field !== 'updatedAt' && field !== 'adminId' && (
+                {field !== 'createdAt' && field !== 'clientStatus' && field !== '__v' && field !== '_id' && field !== 'updatedAt' && field !== 'tenantId' && (
                   <Grid item xs={12}>
                     <Typography variant="h5" component="span" fontWeight="bold">
                       {`${field.charAt(0).toUpperCase() + field.slice(1)}:`}

@@ -27,7 +27,7 @@ const Topbar = ({ setIsSidebar }) => {
   const adminData = {
     userName: user?.userName || "Account",
     image: profile,
-    role: user?.role || "",
+    role: user?.roleName || "",
   };
   const [anchorEl, setAnchorEl] = useState(null);
 

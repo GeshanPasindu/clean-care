@@ -41,9 +41,9 @@ const clientSchema = new Schema(
             type: String,
             required: false,
         },
-        adminId: {
+        tenantId: {
             type: Schema.Types.ObjectId,
-            ref: 'Admin',
+            ref: 'User',
             required: true,
         },
         notes: {

@@ -16,6 +16,7 @@ import {
   TableBody,
   TableCell,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -125,15 +126,20 @@ const StaffPayrollSection = ({ staffId, isStaffView, onSaved }) => {
   const [preview, setPreview] = useState({ entries: [], totalHours: 0, totalAmount: 0, payouts: [] });
   const [previewRange, setPreviewRange] = useState({ startDate: "", endDate: "" });
   const [requestedPeriod, setRequestedPeriod] = useState(null);
+  const [payoutPage, setPayoutPage] = useState(0);
+  const [payoutPageSize, setPayoutPageSize] = useState(25);
   const [payment, setPayment] = useState({ paymentDate: localDateInput(), method: "Cash", referenceNumber: "" });
   const [selectedPayout, setSelectedPayout] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const payrollQuery = useServiceQuery(
-    ["staff-payroll", staffId, requestedPeriod],
-    () => jobService.getStaffPayroll(staffId || "self", requestedPeriod || {}),
+    ["staff-payroll", staffId, requestedPeriod, payoutPage, payoutPageSize],
+    () => jobService.getStaffPayroll(staffId || "self", {
+      ...(requestedPeriod || {}), payoutPage: payoutPage + 1, payoutLimit: payoutPageSize,
+    }),
     { enabled: Boolean(staffId) || isStaffView }
   );
+  useEffect(() => setPayoutPage(0), [staffId]);
   const recordPayroll = useServiceMutation(
     ({ id, values }) => jobService.recordStaffPayroll(id || "self", values),
     { invalidate: [["staff-payroll", staffId]] }
@@ -306,6 +312,15 @@ const StaffPayrollSection = ({ staffId, isStaffView, onSaved }) => {
                 ))}
               </TableBody>
             </Table>
+            <TablePagination
+              component="div"
+              count={payrollQuery.data?.payoutPaginationInfo?.totalResult || 0}
+              page={payoutPage}
+              rowsPerPage={payoutPageSize}
+              rowsPerPageOptions={[10, 25, 50, 100]}
+              onPageChange={(_event, nextPage) => setPayoutPage(nextPage)}
+              onRowsPerPageChange={(event) => { setPayoutPageSize(Number(event.target.value)); setPayoutPage(0); }}
+            />
           </Box>
         )}
       </Paper>

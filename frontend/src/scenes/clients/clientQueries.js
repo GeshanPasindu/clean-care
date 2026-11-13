@@ -17,6 +17,14 @@ export function useClients(options = {}) {
   });
 }
 
+export function useClientPage(params = {}, options = {}) {
+  return useQuery({
+    queryKey: ["clients", "page", params],
+    queryFn: () => clientService.getPaginated(params),
+    ...options,
+  });
+}
+
 export function useActiveClients(options = {}) {
   return useQuery({
     queryKey: clientQueryKeys.active(),

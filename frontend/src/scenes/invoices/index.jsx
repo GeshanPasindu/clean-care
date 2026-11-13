@@ -13,12 +13,18 @@ import {
   import Header from "../../components/Header";
   import { useDeleteInvoice, useInvoices, useUpdateInvoiceStatus } from "./invoiceQueries";
   import { actionButtonSx, filterBarSx, pageContainerSx, pageHeaderRowSx, tableSurfaceSx } from "../../styles/uiStyles";
+  import { useDebouncedValue } from "../../hooks/useDebouncedValue";
   
   const Invoices = () => {
     const [startDate, setStartDate] = useState("");
     const [endDate, setEndDate] = useState("");
     const [filters, setFilters] = useState({});
-    const { data: responseData, isPending } = useInvoices(filters);
+    const [page, setPage] = useState(0);
+    const [pageSize, setPageSize] = useState(25);
+    const [searchInput, setSearchInput] = useState("");
+    const search = useDebouncedValue(searchInput.trim());
+    const queryParams = { ...filters, page: page + 1, limit: pageSize, ...(search ? { search } : {}) };
+    const { data: responseData, isPending } = useInvoices(queryParams);
     const deleteInvoice = useDeleteInvoice();
     const updateInvoiceStatus = useUpdateInvoiceStatus();
     const data = (responseData?.invoices || [])
@@ -26,8 +32,7 @@ import {
         ...item,
         id: item._id,
         clientName: [item.client?.firstName, item.client?.lastName].filter(Boolean).join(" "),
-      }))
-      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      }));
   
     const exportToPdf = () => {
       const doc = new jsPDF();
@@ -98,6 +103,7 @@ import {
       };
       const handleViewInvoices = () => {
         setFilters(startDate && endDate ? { startDate, endDate } : {});
+        setPage(0);
       };
     const columns = [
       { field: "id", headerName: "Invoice ID", flex: 1 },
@@ -176,6 +182,7 @@ import {
       />
     </Box>
   </Box>
+  <TextField size="small" label="Search invoices" value={searchInput} onChange={(event) => { setSearchInput(event.target.value); setPage(0); }} sx={{ minWidth: 220 }} />
   <Box>
     <Typography fontWeight="bold" fontSize="16px">To</Typography>
     <Box>
@@ -208,6 +215,13 @@ import {
             rows={data}
             columns={columns}
             loading={isPending}
+            page={page}
+            pageSize={pageSize}
+            rowCount={responseData?.paginationInfo?.totalResult || 0}
+            paginationMode="server"
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={setPage}
+            onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
             components={{ Toolbar: GridToolbar }}
           />
         </Box>

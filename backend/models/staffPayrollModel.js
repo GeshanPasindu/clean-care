@@ -18,8 +18,8 @@ const payrollLineSchema = new Schema({
 
 const staffPayrollSchema = new Schema({
   receiptNumber: { type: String, required: true, unique: true, trim: true, maxlength: 40 },
-  staff: { type: Schema.Types.ObjectId, ref: "Staff", required: true, index: true },
-  adminId: { type: Schema.Types.ObjectId, ref: "Admin", required: true },
+  staff: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+  tenantId: { type: Schema.Types.ObjectId, ref: "User", required: true },
   payeeName: { type: String, required: true, trim: true, maxlength: 160 },
   payeeEmail: { type: String, trim: true, maxlength: 254, default: "" },
   payeePhoneNumber: { type: String, trim: true, maxlength: 40, default: "" },

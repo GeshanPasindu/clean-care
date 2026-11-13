@@ -8,7 +8,8 @@
     "start": "nodemon index.js",
     "auth:create-super-admin": "node scripts/createSuperAdmin.js",
     "auth:reset-password": "node scripts/resetUserPassword.js",
-    "auth:ensure-single-super-admin": "node scripts/ensureSingleSuperAdminIndex.js"
+    "auth:seed-access-control": "node scripts/seedAccessControl.js",
+    "auth:purge-deleted-users": "node scripts/purgeDeletedUsers.js"
   },
   "author": "",
   "license": "ISC",

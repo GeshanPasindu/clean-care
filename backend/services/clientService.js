@@ -1,5 +1,5 @@
 import Client from "../models/clientModel.js";
-import { adminScope, getAdminProfileId } from "./authorizationService.js";
+import { getTenantIdForUser, tenantDataScope } from "./authorizationService.js";
 import { ServiceError } from "./serviceError.js";
 
 const clientFields = [
@@ -19,8 +19,8 @@ const selectClientFields = (body = {}) => Object.fromEntries(
 export const clientService = {
   async create(body, user) {
     const fields = selectClientFields(body);
-    const adminId = await getAdminProfileId(user);
-    if (!adminId) throw new ServiceError("An admin profile is required to create clients", 403);
+    const tenantId = await getTenantIdForUser(user);
+    if (!tenantId) throw new ServiceError("A tenant account is required to create clients", 403);
     if (!fields.firstName || !fields.lastName || !fields.email || !fields.address || !fields.phoneNumber) {
       throw new ServiceError("Client name, email, address, and phone are required", 400);
     }
@@ -32,14 +32,14 @@ export const clientService = {
       throw new ServiceError("Client already exists", 409);
     }
 
-    return Client.create({ ...fields, adminId });
+    return Client.create({ ...fields, tenantId });
   },
 
   async update(id, body, user) {
     const fields = selectClientFields(body);
     if (fields.email !== undefined) fields.email = String(fields.email).trim().toLowerCase();
     const updatedClient = await Client.findOneAndUpdate(
-      { _id: id, ...(await adminScope({ user })) },
+      { _id: id, ...(await tenantDataScope({ user })) },
       { $set: fields },
       { new: true, runValidators: true }
     );
@@ -48,27 +48,27 @@ export const clientService = {
   },
 
   async remove(id, user) {
-    const deletedClient = await Client.findOneAndDelete({ _id: id, ...(await adminScope({ user })) });
+    const deletedClient = await Client.findOneAndDelete({ _id: id, ...(await tenantDataScope({ user })) });
     if (!deletedClient) throw new ServiceError("Client not found", 404);
     return deletedClient;
   },
 
   async getById(id, user) {
-    const client = await Client.findOne({ _id: id, ...(await adminScope({ user })) });
+    const client = await Client.findOne({ _id: id, ...(await tenantDataScope({ user })) });
     if (!client) throw new ServiceError("Client not found", 404);
     return client;
   },
 
   async getAll(user) {
-    return Client.find(await adminScope({ user })).sort({ createdAt: -1 });
+    return Client.find(await tenantDataScope({ user })).sort({ createdAt: -1 });
   },
 
   async count(user) {
-    return Client.countDocuments(await adminScope({ user }));
+    return Client.countDocuments(await tenantDataScope({ user }));
   },
 
   async getActive(user) {
-    return Client.find({ ...(await adminScope({ user })), clientStatus: "active" }).sort({ createdAt: -1 });
+    return Client.find({ ...(await tenantDataScope({ user })), clientStatus: "active" }).sort({ createdAt: -1 });
   },
 
   async getPaginated({ page: rawPage, limit: rawLimit, search: rawSearch = "" } = {}, user) {
@@ -78,7 +78,7 @@ export const clientService = {
     const search = rawSearch.trim().slice(0, 100);
     const page = parsePage(rawPage, 1, Number.MAX_SAFE_INTEGER);
     const limit = parsePage(rawLimit, 10, 100);
-    const scope = await adminScope({ user });
+    const scope = await tenantDataScope({ user });
     const searchFilter = search
       ? { $or: ["firstName", "lastName", "address"].map((field) => ({ [field]: { $regex: escapeRegex(search), $options: "i" } })) }
       : {};
@@ -99,7 +99,7 @@ export const clientService = {
       throw new ServiceError("Invalid client status", 400);
     }
     const client = await Client.findOneAndUpdate(
-      { _id: id, ...(await adminScope({ user })) },
+      { _id: id, ...(await tenantDataScope({ user })) },
       { $set: { clientStatus } },
       { new: true, runValidators: true }
     );

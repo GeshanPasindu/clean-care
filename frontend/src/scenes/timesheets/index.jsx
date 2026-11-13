@@ -7,8 +7,8 @@ import Header from "../../components/Header";
 import { useAuth } from "../../auth/AuthContext";
 import { filterBarSx, pageContainerSx, tableSurfaceSx } from "../../styles/uiStyles";
 import { useServiceQuery } from "../../queries/queryHelpers";
-import { adminService } from "../../services/adminService";
-import { staffService } from "../../services/staffService";
+import { userService } from "../../services/userService";
+import { useActiveEmployees } from "../users/userQueries";
 import { jobService } from "../jobs/jobService";
 
 const formatDateTime = (value) => value ? new Date(value).toLocaleString() : "—";
@@ -24,14 +24,16 @@ const formatHoursMinutes = (value) => {
 };
 
 function Timesheets() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
-  const isStaff = user?.role === "staff";
-  const isSuperAdmin = user?.role === "superAdmin";
+  const isStaff = user?.scope === "staff";
+  const isPlatform = user?.scope === "platform";
+  const canAssignSupervisor = hasPermission("users.tenant.assign");
+  const canReadUsers = hasPermission("users.read");
   const staffId = searchParams.get("staffId") || "";
   const supervisorId = searchParams.get("supervisorId") || "";
   const filters = {
@@ -46,23 +48,23 @@ function Timesheets() {
     ["timesheets", filters],
     () => jobService.getTimesheets(filters)
   );
-  const staffQuery = useServiceQuery(["staff", "list"], staffService.getAll, {
-    enabled: !isStaff,
-  });
-  const adminsQuery = useServiceQuery(["admins", "list"], adminService.getAll, {
-    enabled: isSuperAdmin,
-  });
+  const staffQuery = useActiveEmployees({ enabled: !isStaff && canReadUsers });
+  const supervisorsQuery = useServiceQuery(
+    ["users", "list", { scope: "tenant", status: "active" }],
+    () => userService.getAll({ scope: "tenant", status: "active" }),
+    { enabled: canAssignSupervisor }
+  );
   const rows = timesheetsQuery.data?.timesheets || [];
   const total = timesheetsQuery.data?.paginationInfo?.total || 0;
   const totalHours = Number(timesheetsQuery.data?.totalHours || 0);
-  const staffOptions = staffQuery.data?.staffs || [];
-  const supervisorOptions = adminsQuery.data?.admins || [];
+  const staffOptions = staffQuery.data?.users || [];
+  const supervisorOptions = supervisorsQuery.data?.users || [];
   const loading = timesheetsQuery.isPending;
   const error = timesheetsQuery.isError
     ? timesheetsQuery.error.message || "Could not load timesheets."
     : staffQuery.isError
       ? "Could not load staff filters."
-      : adminsQuery.isError
+      : supervisorsQuery.isError
         ? "Could not load supervisor filters."
         : "";
 
@@ -105,18 +107,16 @@ function Timesheets() {
   ];
 
   const selectedStaff = staffOptions.find((staff) => String(staff._id) === staffId);
-  const selectedSupervisor = supervisorOptions.find((admin) => String(admin.adminDetails?._id) === supervisorId);
-  const selectedSupervisorUserId = selectedSupervisor?.adminDetails?.user;
+  const selectedSupervisor = supervisorOptions.find((admin) => String(admin._id) === supervisorId);
   const staffMatchesSelectedSupervisor = (staff) =>
-    String(staff.supervisorId) === supervisorId
-    || (selectedSupervisorUserId && String(staff.supervisorId) === String(selectedSupervisorUserId));
+    String(staff.tenantId || "") === supervisorId;
   const subtitle = isStaff
     ? "Your recorded work sessions"
     : selectedStaff
       ? `Work sessions for ${[selectedStaff.firstName, selectedStaff.lastName].filter(Boolean).join(" ")}`
       : selectedSupervisor
-        ? `Work sessions under ${[selectedSupervisor.adminDetails?.firstName, selectedSupervisor.adminDetails?.lastName].filter(Boolean).join(" ") || selectedSupervisor.userName}`
-        : isSuperAdmin
+        ? `Work sessions under ${[selectedSupervisor.firstName, selectedSupervisor.lastName].filter(Boolean).join(" ") || selectedSupervisor.userName}`
+          : isPlatform
           ? "Work sessions across all employees"
           : "Work sessions for employees under your supervision";
 
@@ -124,7 +124,7 @@ function Timesheets() {
     <Box sx={pageContainerSx}>
       <Header title="Timesheets" subtitle={subtitle} />
       <Box sx={{ ...filterBarSx, mt: 2.5, mb: 2, flexWrap: "wrap", gap: 2 }}>
-        {isSuperAdmin && (
+        {canAssignSupervisor && (
           <TextField
             select
             label="Supervisor"
@@ -133,14 +133,14 @@ function Timesheets() {
             sx={{ minWidth: 220 }}
           >
             <MenuItem value="">All supervisors</MenuItem>
-            {supervisorOptions.filter((admin) => admin.adminDetails?._id).map((admin) => (
-              <MenuItem key={admin.adminDetails._id} value={admin.adminDetails._id}>
-                {[admin.adminDetails.firstName, admin.adminDetails.lastName].filter(Boolean).join(" ") || admin.userName}
+            {supervisorOptions.map((admin) => (
+              <MenuItem key={admin._id} value={admin._id}>
+                {[admin.firstName, admin.lastName].filter(Boolean).join(" ") || admin.userName}
               </MenuItem>
             ))}
           </TextField>
         )}
-        {!isStaff && (
+        {!isStaff && canReadUsers && (
           <TextField
             select
             label="Employee"
@@ -150,7 +150,7 @@ function Timesheets() {
           >
             <MenuItem value="">All employees in scope</MenuItem>
             {staffOptions
-              .filter((staff) => !isSuperAdmin || !supervisorId || staffMatchesSelectedSupervisor(staff))
+              .filter((staff) => !isPlatform || !supervisorId || staffMatchesSelectedSupervisor(staff))
               .map((staff) => (
               <MenuItem key={staff._id} value={staff._id}>
                 {[staff.firstName, staff.lastName].filter(Boolean).join(" ")}

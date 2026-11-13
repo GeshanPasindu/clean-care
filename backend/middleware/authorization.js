@@ -1,24 +1,17 @@
 import mongoose from "mongoose";
 import Invoice from "../models/invoiceModel.js";
-import Staff from "../models/staffModel.js";
 import User from "../models/userModel.js";
-import { adminScope, getAdminProfileId, getStaffProfileId, invoiceScope, jobScope } from "../services/authorizationService.js";
+import { requirePermissions } from "./authentication.js";
+import { getTenantIdForUser, invoiceScope, jobScope, roleScope, tenantDataScope } from "../services/authorizationService.js";
 
-export { adminScope, getAdminProfileId, getStaffProfileId, invoiceScope, jobScope };
+export { getTenantIdForUser, invoiceScope, jobScope, tenantDataScope };
 
-export function requireOwnedRecord(Model, { param = "id", ownerField = "adminId", ownerType = "admin" } = {}) {
+export function requireOwnedRecord(Model, { param = "id", ownerType = "tenant" } = {}) {
   return async (req, res, next) => {
     const id = req.params[param];
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: `Invalid ${param}` });
-    if (req.user?.role === "superAdmin") return next();
-
     try {
-      const scope = ownerType === "staff"
-        ? { [ownerField]: await getStaffProfileId(req.user) }
-        : ownerType === "job"
-          ? await jobScope(req)
-          : await adminScope(req);
-      if (!Object.values(scope).some(Boolean)) return res.status(403).json({ message: "Access denied" });
+      const scope = ownerType === "job" ? await jobScope(req) : await tenantDataScope(req);
       const exists = await Model.exists({ _id: id, ...scope });
       if (!exists) return res.status(404).json({ message: "Record not found" });
       return next();
@@ -35,22 +28,25 @@ export const requireSelf = (param = "id") => (req, res, next) => {
   return next();
 };
 
+export const requireUserPermission = (param, selfPermission, otherPermission) => (req, res, next) => {
+  if (req.params[param] === "self") req.params[param] = String(req.user._id);
+  const isSelf = String(req.params[param]) === String(req.user._id);
+  return requirePermissions(isSelf ? selfPermission : otherPermission)(req, res, next);
+};
+
 export const requireUserRecordAccess = (param = "id") => async (req, res, next) => {
   const targetId = req.params[param];
   if (!mongoose.isValidObjectId(targetId)) return res.status(400).json({ message: `Invalid ${param}` });
-  if (req.user?.role === "superAdmin" || String(req.user?._id) === String(targetId)) return next();
-  if (req.user?.role !== "admin") return res.status(403).json({ message: "Access denied" });
+  if (String(req.user?._id) === String(targetId)) return next();
 
   try {
-    const [target, adminId] = await Promise.all([
-      User.findById(targetId).select("_id role staffDetails adminDetails"),
-      getAdminProfileId(req.user),
+    const [target, tenantId] = await Promise.all([
+      User.findOne({ _id: targetId, isDeleted: false }).select("_id tenantId"),
+      getTenantIdForUser(req.user),
     ]);
-    if (!target || !adminId || target.role !== "staff") {
+    if (!target || roleScope(req.user) !== "platform" && (!tenantId || String(target.tenantId) !== String(tenantId))) {
       return res.status(404).json({ message: "User not found" });
     }
-    const staff = await Staff.exists({ user: target._id, adminId });
-    if (!staff) return res.status(404).json({ message: "User not found" });
     return next();
   } catch (error) {
     return next(error);
@@ -60,15 +56,15 @@ export const requireUserRecordAccess = (param = "id") => async (req, res, next) 
 export const requireInvoiceRecord = (param = "id") => async (req, res, next) => {
   const id = req.params[param];
   if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: `Invalid ${param}` });
-  if (req.user?.role === "superAdmin") return next();
+  if (roleScope(req.user) === "platform") return next();
   try {
     const [invoice, scope] = await Promise.all([
-      Invoice.findById(id).populate("client", "adminId"),
-      adminScope(req),
+      Invoice.findById(id).populate("client", "tenantId"),
+      tenantDataScope(req),
     ]);
     if (!invoice?.client) return res.status(404).json({ message: "Invoice not found" });
-    const ownerIds = scope.adminId?.$in || [];
-    if (!ownerIds.some((ownerId) => String(ownerId) === String(invoice.client.adminId))) {
+    const tenantId = scope.tenantId;
+    if (!tenantId || String(tenantId) !== String(invoice.client.tenantId)) {
       return res.status(404).json({ message: "Invoice not found" });
     }
     return next();

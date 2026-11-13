@@ -7,26 +7,33 @@ import Header from "../../components/Header";
 import { filterBarSx, pageContainerSx, tableSurfaceSx } from "../../styles/uiStyles";
 import { useClient, clientQueryKeys } from "./clientQueries";
 import { jobService } from "../jobs/jobService";
+import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 
 const ClientJobs = () => {
   const { id } = useParams();
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [filters, setFilters] = useState({});
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
+  const [searchInput, setSearchInput] = useState("");
+  const search = useDebouncedValue(searchInput.trim());
+  const queryParams = { ...filters, page: page + 1, limit: pageSize, ...(search ? { search } : {}) };
   const { data: clientResponse } = useClient(id);
   const jobsQuery = useQuery({
-    queryKey: clientQueryKeys.jobs(id, filters),
-    queryFn: () => jobService.getFilteredByClient(id, filters),
+    queryKey: clientQueryKeys.jobs(id, queryParams),
+    queryFn: () => jobService.getFilteredByClient(id, queryParams),
     enabled: Boolean(id),
   });
   const jobs = jobsQuery.data?.jobs || [];
   const clientName = [clientResponse?.client?.firstName, clientResponse?.client?.lastName]
     .filter(Boolean)
     .join(" ");
-  const totalPayments = jobs.reduce((sum, job) => sum + (job.payment || 0), 0);
+  const totalPayments = Number(jobsQuery.data?.totalPayment || 0);
 
   const handleViewJobs = () => {
     setFilters(startDate && endDate ? { startDate, endDate } : {});
+    setPage(0);
   };
 
   const columns = [
@@ -86,11 +93,22 @@ const ClientJobs = () => {
       </Box>
 
       <Box sx={tableSurfaceSx}>
+        <Box sx={{ display: "flex", justifyContent: "flex-end", px: 2, pt: 2 }}>
+          <TextField size="small" label="Search jobs" value={searchInput} onChange={(event) => { setSearchInput(event.target.value); setPage(0); }} sx={{ minWidth: 250 }} />
+        </Box>
         <DataGrid
           rows={jobs}
           columns={columns}
+          loading={jobsQuery.isPending}
           components={{ Toolbar: GridToolbar }}
           getRowId={(row) => row._id}
+          page={page}
+          pageSize={pageSize}
+          rowCount={jobsQuery.data?.paginationInfo?.totalResult || 0}
+          paginationMode="server"
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={setPage}
+          onPageSizeChange={(nextPageSize) => { setPageSize(nextPageSize); setPage(0); }}
         />
       </Box>
     </Box>

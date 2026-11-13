@@ -21,7 +21,7 @@ import {
   import Header from "../../components/Header";
 import { formPageSx } from "../../styles/uiStyles";
   import { useActiveClients } from "../clients/clientQueries";
-  import { useActiveStaff } from "../staff/staffQueries";
+  import { useAssignableStaff } from "../users/userQueries";
   import { useServiceMutation } from "../../queries/queryHelpers";
   import { jobService } from "./jobService";
   
@@ -31,9 +31,9 @@ import { formPageSx } from "../../styles/uiStyles";
     const [alertMessage, setAlertMessage] = useState("");
     const [alertSeverity, setAlertSeverity] = useState("success");
     const { data: clientsResponse } = useActiveClients();
-    const { data: staffsResponse } = useActiveStaff();
+    const { data: staffsResponse } = useAssignableStaff();
     const clients = clientsResponse?.clients || [];
-    const staffs = staffsResponse?.staffs || [];
+    const staffs = staffsResponse?.users || [];
     const createJob = useServiceMutation(jobService.create, { invalidate: [["jobs"]] });
     const navigate = useNavigate();
   
@@ -210,20 +210,22 @@ import { formPageSx } from "../../styles/uiStyles";
                   const selectedStaff = staffs.find((staff) => staff._id === staffId);
                   if (!selectedStaff) return null;
                   return (
-                    <Box key={staffId}>
+                    <React.Fragment key={staffId}>
                       <Typography fontWeight="bold" fontSize="16px">
                         Hourly Rate for {selectedStaff.firstName} {selectedStaff.lastName}*
                       </Typography>
-                      <TextField
-                        fullWidth
-                        variant="filled"
-                        type="number"
-                        value={values.staffRates?.[staffId] ?? values.staffHourRate}
-                        onBlur={handleBlur}
-                        onChange={(event) => setFieldValue(`staffRates.${staffId}`, event.target.value)}
-                        inputProps={{ min: 0, step: "0.01" }}
-                      />
-                    </Box>
+                      <Box mt={-2}>
+                        <TextField
+                          fullWidth
+                          variant="filled"
+                          type="number"
+                          value={values.staffRates?.[staffId] ?? values.staffHourRate}
+                          onBlur={handleBlur}
+                          onChange={(event) => setFieldValue(`staffRates.${staffId}`, event.target.value)}
+                          inputProps={{ min: 0, step: "0.01" }}
+                        />
+                      </Box>
+                    </React.Fragment>
                   );
                 })}
                 <Typography fontWeight="bold" fontSize="16px">

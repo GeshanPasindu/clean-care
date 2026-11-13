@@ -25,8 +25,8 @@ export const getInvoiceById = async (req, res) => {
 };
 
 export const getAllInvoices = async (req, res) => {
-  const invoices = await invoiceService.getAll(req.query, req.user);
-  return res.status(200).json({ response_code: 200, success: true, message: "Invoices fetched successfully", invoices });
+  const result = await invoiceService.getAll(req.query, req.user);
+  return res.status(200).json({ response_code: 200, success: true, message: "Invoices fetched successfully", ...result });
 };
 
 export const updateStatus = async (req, res) => {

@@ -1,21 +1,7 @@
 import passport from "passport";
-import { authCookieOptions } from "../config/security.js";
+import { clearRefreshCookie, refreshCookieName, setRefreshCookie } from "../config/authCookie.js";
 import { authService } from "../services/authService.js";
 import { ServiceError } from "../services/serviceError.js";
-
-const refreshCookieName = "cc_refresh";
-
-const setRefreshCookie = (res, session) => {
-  res.cookie(refreshCookieName, session.refreshToken, {
-    ...authCookieOptions(),
-    expires: session.expiresAt,
-    maxAge: Math.max(0, session.expiresAt.getTime() - Date.now()),
-  });
-};
-
-export const clearRefreshCookie = (res) => {
-  res.clearCookie(refreshCookieName, authCookieOptions());
-};
 
 export const login = (req, res, next) => {
   passport.authenticate("local", { session: false }, async (error, user) => {
@@ -60,20 +46,3 @@ export const logoutAll = async (req, res) => {
   clearRefreshCookie(res);
   return res.status(200).json({ success: true });
 };
-
-export const me = async (req, res) => (
-  res.status(200).json({ success: true, user: await authService.getSafeUser(req.user) })
-);
-
-export const changePassword = async (req, res, next) => {
-  try {
-    await authService.changePassword(req.user._id, req.body?.currentPassword, req.body?.newPassword);
-    clearRefreshCookie(res);
-    return res.status(200).json({ success: true, message: "Password updated. Please sign in again." });
-  } catch (error) {
-    if (error instanceof ServiceError) return res.status(error.statusCode).json({ message: error.message });
-    return next(error);
-  }
-};
-
-export const authConfig = { refreshCookieName };

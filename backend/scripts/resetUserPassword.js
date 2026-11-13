@@ -17,7 +17,7 @@ try {
     throw new Error("Enter a valid email and a password between 10 and 128 characters");
   }
 
-  const user = await User.findOne({ email }).select("+password");
+  const user = await User.findOne({ email, isDeleted: false }).select("+password");
   if (!user) throw new Error("No account found for that email");
   user.password = await argon2.hash(password, passwordOptions);
   await user.save();

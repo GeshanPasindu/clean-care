@@ -1,21 +1,21 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import argon2 from "argon2";
 import jwt from "jsonwebtoken";
-import Admin from "../models/adminModel.js";
 import RefreshSession from "../models/refreshSessionModel.js";
 import RefreshToken from "../models/refreshTokenModel.js";
-import Staff from "../models/staffModel.js";
+import Role from "../models/roleModel.js";
 import User from "../models/userModel.js";
 import { hashPassword, verifyPasswordAndUpgrade } from "./credentialService.js";
 import { ServiceError } from "./serviceError.js";
 import { revokeUserSessions } from "./sessionService.js";
 import { getAccessTokenSecret } from "./tokenService.js";
+import { getRolePermissionKeys } from "./authorizationService.js";
 
 const accessTokenLifetime = "10m";
 const refreshLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const absoluteRefreshLifetimeMs = 90 * 24 * 60 * 60 * 1000;
 const tokenDigest = (token) => createHash("sha256").update(token).digest("hex");
 const createRefreshToken = () => randomBytes(48).toString("base64url");
+const userFields = "_id userName email role status firstName lastName address phoneNumber dateOfBirth position tenantId isDeleted deletedAt";
 
 const createAccessToken = (user, sessionId) => jwt.sign(
   { sid: String(sessionId), jti: randomUUID() },
@@ -29,36 +29,48 @@ const createAccessToken = (user, sessionId) => jwt.sign(
   }
 );
 
+async function getActiveRole(roleId) {
+  if (!roleId) return null;
+  const role = await Role.findOne({ _id: roleId, isActive: true }).lean();
+  return role || null;
+}
+
 async function safeUser(user) {
-  const result = {
+  const role = await getActiveRole(user.roleId || user.role);
+  if (!role) throw new ServiceError("This account's role is no longer active", 403);
+  const [permissions, supervisor] = await Promise.all([
+    getRolePermissionKeys(role._id),
+    role.scope === "staff" && user.tenantId
+      ? User.findById(user.tenantId).select("_id userName firstName lastName")
+      : null,
+  ]);
+  const supervisorName = supervisor
+    ? [supervisor.firstName, supervisor.lastName].filter(Boolean).join(" ") || supervisor.userName || ""
+    : "";
+
+  return {
     id: String(user._id),
     _id: String(user._id),
     userName: user.userName,
     email: user.email,
-    role: user.role,
+    role: role.key,
+    roleId: String(role._id),
+    roleName: role.name,
+    scope: role.scope,
+    isPlatformAdmin: role.scope === "platform",
+    permissions,
     status: user.status,
-    adminDetails: user.adminDetails || null,
-    staffDetails: user.staffDetails || null,
-    superAdminDetails: user.superAdminDetails || null,
+    firstName: user.firstName || "",
+    lastName: user.lastName || "",
+    address: user.address || "",
+    phoneNumber: user.phoneNumber || "",
+    dateOfBirth: user.dateOfBirth || null,
+    position: user.position || "",
+    tenantId: user.tenantId ? String(user.tenantId) : null,
+    supervisor: supervisor?._id ? { id: String(supervisor._id), name: supervisorName } : null,
+    supervisorName,
+    isDeleted: Boolean(user.isDeleted),
   };
-
-  if (user.role === "staff") {
-    const staff = await Staff.findOne({ user: user._id }).select("adminId").populate({
-      path: "adminId",
-      select: "_id firstName lastName user",
-      populate: { path: "user", select: "_id userName" },
-    });
-    if (staff?.adminId) {
-      const supervisor = staff.adminId;
-      result.supervisor = {
-        id: String(supervisor._id),
-        name: [supervisor.firstName, supervisor.lastName].filter(Boolean).join(" ") || supervisor.user?.userName || "",
-      };
-      result.supervisorName = result.supervisor.name;
-    }
-  }
-
-  return result;
 }
 
 async function createRefreshSession(user, requestMetadata) {
@@ -102,41 +114,35 @@ async function revokeRefreshFamily(familyId, now = new Date()) {
 
 export const authService = {
   async authenticateLocal(email, password) {
-    if (typeof email !== "string" || typeof password !== "string" || password.length > 256) {
-      return null;
-    }
-
-    const normalizedEmail = email.trim().toLowerCase();
-    const user = await User.findOne({ email: normalizedEmail }).select("+password");
+    if (typeof email !== "string" || typeof password !== "string" || password.length > 256) return null;
+    const user = await User.findOne({ email: email.trim().toLowerCase(), isDeleted: false }).select("+password");
     if (!user || user.status !== "active") {
       if (!user) await verifyPasswordAndUpgrade(null, password);
       return null;
     }
-
-    return (await verifyPasswordAndUpgrade(user, password)) ? user : null;
+    if (!(await verifyPasswordAndUpgrade(user, password)) || !(await getActiveRole(user.role))) return null;
+    return user;
   },
 
   async authenticateAccess(payload) {
     if (!payload.sub || !payload.sid) return null;
-
+    const now = new Date();
     const [user, session] = await Promise.all([
-      User.findById(payload.sub).select("_id userName email role status adminDetails staffDetails superAdminDetails"),
+      User.findOne({ _id: payload.sub, status: "active", isDeleted: false }).select(userFields),
       RefreshSession.findOne({
         _id: payload.sid,
         user: payload.sub,
         revokedAt: null,
-        expiresAt: { $gt: new Date() },
+        expiresAt: { $gt: now },
       }).select("_id user familyId"),
     ]);
-
-    return user?.status === "active" && session ? user : null;
+    if (!user || !session || !(await getActiveRole(user.role))) return null;
+    return safeUser(user);
   },
 
   async createSession(user, requestMetadata = {}) {
-    if (user.role === "superAdmin" && !user.adminDetails) {
-      const adminProfile = await Admin.findOne({ user: user._id }).select("_id") || await Admin.create({ user: user._id });
-      user.adminDetails = adminProfile._id;
-      await user.save();
+    if (user.isDeleted || user.status !== "active" || !(await getActiveRole(user.role))) {
+      throw new ServiceError("This account is not active", 401);
     }
     const { session, refreshToken } = await createRefreshSession(user, requestMetadata);
     return buildSessionResult(user, session, refreshToken);
@@ -158,13 +164,7 @@ export const authService = {
       await revokeRefreshFamily(tokenRecord.familyId, now);
       throw new ServiceError("Session reuse detected; sign in again", 401);
     }
-
-    if (
-      session.revokedAt ||
-      session.expiresAt <= now ||
-      session.absoluteExpiresAt <= now ||
-      tokenRecord.expiresAt <= now
-    ) {
+    if (session.revokedAt || session.expiresAt <= now || session.absoluteExpiresAt <= now || tokenRecord.expiresAt <= now) {
       throw new ServiceError("Session expired", 401);
     }
 
@@ -178,8 +178,8 @@ export const authService = {
       throw new ServiceError("Session reuse detected; sign in again", 401);
     }
 
-    const user = await User.findById(session.user).select("_id userName email role status adminDetails staffDetails superAdminDetails");
-    if (!user || user.status !== "active") {
+    const user = await User.findOne({ _id: session.user, status: "active", isDeleted: false }).select(userFields);
+    if (!user || !(await getActiveRole(user.role))) {
       await RefreshSession.updateOne({ _id: session._id }, { $set: { revokedAt: now } });
       throw new ServiceError("Session expired", 401);
     }
@@ -213,15 +213,10 @@ export const authService = {
   },
 
   async changePassword(userId, currentPassword, newPassword) {
-    if (
-      typeof currentPassword !== "string" ||
-      typeof newPassword !== "string" ||
-      newPassword.length < 10 ||
-      newPassword.length > 128
-    ) {
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string" || newPassword.length < 10 || newPassword.length > 128) {
       throw new ServiceError("Use a new password between 10 and 128 characters", 400);
     }
-    const user = await User.findById(userId).select("+password");
+    const user = await User.findOne({ _id: userId, status: "active", isDeleted: false }).select("+password");
     if (!user || !(await verifyPasswordAndUpgrade(user, currentPassword))) {
       throw new ServiceError("Current password is incorrect", 400);
     }

@@ -2,7 +2,7 @@ import express from "express";
 import {
   addJob, updatedJob, getTotalAndProfit, getAllJobsCount, recordClientPayment, getStaffJobsbyId,
   getTimesheets,
-  getStaffPayroll, recordStaffPayroll,
+  recordStaffPayroll,
   getFilteredJobs, getInvoice, getJobsByStaffId, signInJob, signOffJob,
   getAllCompletedJobs, deleteJobById, getJobById, getAllJobs, getAllJobPagination, updateStatus,
 } from "../controllers/jobController.js";
@@ -32,7 +32,7 @@ router.get("/getInvoice/:jobId", requirePermissions("jobs.invoice.read"), requir
 router.get("/getJobsbyStaff/:staffId", requirePermissions("jobs.read"), asyncHandler(getJobsByStaffId));
 router.get("/getFilteredJobs/:clientId", requirePermissions("jobs.read"), requireOwnedRecord(Client, { param: "clientId" }), asyncHandler(getFilteredJobs));
 router.get("/getStaffJobsbyId/:assignedStaff", requireUserPermission("assignedStaff", "payroll.self.read", "jobs.assigned.read"), requireUserRecordAccess("assignedStaff"), asyncHandler(getStaffJobsbyId));
-router.get("/staffPayroll/:staffId", requireUserPermission("staffId", "payroll.self.read", "payroll.read"), requireUserRecordAccess("staffId"), asyncHandler(getStaffPayroll));
+router.get("/staffPayroll/:staffId", (_req, res) => res.status(410).json({ message: "Use Employee Payments or your paid receipts" }));
 router.post("/staffPayroll/:staffId", requirePermissions("payroll.record"), asyncHandler(recordStaffPayroll));
 router.post("/:jobId/receivedPayments", requirePermissions("clients.payment.record"), requireOwnedRecord(Job, { param: "jobId" }), asyncHandler(recordClientPayment));
 

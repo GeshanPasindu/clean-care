@@ -8,6 +8,8 @@ import RefreshSession from "../models/refreshSessionModel.js";
 import RefreshToken from "../models/refreshTokenModel.js";
 import StaffPayroll from "../models/staffPayrollModel.js";
 import User from "../models/userModel.js";
+import EmployeePayment from "../models/employeePaymentModel.js";
+import SalaryPlan from "../models/salaryPlanModel.js";
 
 const retentionDays = Number(process.env.USER_DELETION_RETENTION_DAYS);
 
@@ -33,6 +35,9 @@ try {
 
   for (const user of expiredUsers) {
     await Promise.all([
+      EmployeePayment.updateMany({ employee: user._id }, { $set: { payeeName: "Former user", payeeEmail: "" } }),
+      EmployeePayment.deleteMany({ employee: user._id, status: "Pending" }),
+      SalaryPlan.deleteMany({ employee: user._id }),
       StaffPayroll.updateMany({ staff: user._id }, {
         $set: { payeeName: "Former user", payeeEmail: "", payeePhoneNumber: "" },
       }),

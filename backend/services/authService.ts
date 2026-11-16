@@ -19,7 +19,7 @@ const refreshLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const absoluteRefreshLifetimeMs = 90 * 24 * 60 * 60 * 1000;
 const tokenDigest = (token: string) => createHash("sha256").update(token).digest("hex");
 const createRefreshToken = () => randomBytes(48).toString("base64url");
-const userFields = "_id userName email role status firstName lastName address phoneNumber dateOfBirth position tenantId isDeleted deletedAt";
+const userFields = "_id userName email role status firstName lastName address phoneNumber dateOfBirth position tenantId isDeleted deletedAt mustChangePassword";
 
 const createAccessToken = (user: Pick<UserRecord, "_id">, sessionId: EntityId) => jwt.sign(
   { sid: String(sessionId), jti: randomUUID() },
@@ -132,7 +132,7 @@ export const authService = {
     if (!payload.sub || !payload.sid) return null;
     const now = new Date();
     const [user, session] = await Promise.all([
-      User.findOne({ _id: payload.sub, status: "active", isDeleted: false }).select(userFields),
+      User.findOne({ _id: payload.sub, status: "active", isDeleted: false, mustChangePassword: { $ne: true } }).select(userFields),
       RefreshSession.findOne({
         _id: payload.sid,
         user: payload.sub,
@@ -140,11 +140,12 @@ export const authService = {
         expiresAt: { $gt: now },
       }).select("_id user familyId"),
     ]);
-    if (!user || !session || !(await getActiveRole(user.role))) return null;
+    if (!user || user.mustChangePassword || !session || !(await getActiveRole(user.role))) return null;
     return safeUser(user);
   },
 
   async createSession(user: UserRecord, requestMetadata: SessionMetadata = {}) {
+    if (user.mustChangePassword) throw new ServiceError("Use your first-login invitation and change your temporary password before signing in", 403);
     if (user.isDeleted || user.status !== "active" || !(await getActiveRole(user.role))) {
       throw new ServiceError("This account is not active", 401);
     }
@@ -182,8 +183,8 @@ export const authService = {
       throw new ServiceError("Session reuse detected; sign in again", 401);
     }
 
-    const user = await User.findOne({ _id: session.user, status: "active", isDeleted: false }).select(userFields);
-    if (!user || !(await getActiveRole(user.role))) {
+    const user = await User.findOne({ _id: session.user, status: "active", isDeleted: false, mustChangePassword: { $ne: true } }).select(userFields);
+    if (!user || user.mustChangePassword || !(await getActiveRole(user.role))) {
       await RefreshSession.updateOne({ _id: session._id }, { $set: { revokedAt: now } });
       throw new ServiceError("Session expired", 401);
     }

@@ -1,3 +1,5 @@
+import EmployeePayment from "../models/employeePaymentModel.js";
+import { ServiceError } from "./serviceError.js";
 import type { FilterQuery, Query } from "mongoose";
 import type { ActorContext, EntityId, PayFrequency, ServiceContext, ServiceResult, JobStatus } from "../types/domain.js";
 import type { JobRecord, JobDocument, JobView, StaffAssignment, UserReference, UserRecord, TimeEntry, ClientPaymentReceipt, StaffPaymentReceipt, RoleRecord, PayrollLine, AssignmentView } from "../types/models.js";
@@ -6,7 +8,7 @@ import type { CreateJobInput, UpdateJobInput, JobListQuery, ClientJobQuery, Time
 import { asList, referenceId } from "../utils/references.js";
 type Empty = Record<string, never>;
 type JobQuery<T> = Query<T, JobDocument, Record<string, never>, JobRecord>;
-import { errorMessage, errorName, errorCode, errorStatus } from "../utils/errors.js";
+import { errorMessage, errorName } from "../utils/errors.js";
 import Job from "../models/jobModel.js";
 import Client from "../models/clientModel.js";
 import StaffPayroll from "../models/staffPayrollModel.js";
@@ -105,9 +107,9 @@ function assignmentRows(job: JobRecord): StaffAssignment[] {
   );
 }
 
-function createStaffAssignment(staffId: EntityId, estimatedHours: number | undefined, hourRate: number | undefined): StaffAssignment {
+function createStaffAssignment(staffId: EntityId, estimatedHours: number | undefined, hourRate: number): StaffAssignment {
   const hours = Number(estimatedHours || 0);
-  const rate = Number(hourRate || 0);
+  const rate = hourRate;
   return {
     staff: new mongoose.Types.ObjectId(staffId),
     isAssigned: true,
@@ -124,22 +126,22 @@ function createStaffAssignment(staffId: EntityId, estimatedHours: number | undef
   };
 }
 
-function normalizeStaffRates(value: Record<string, number> | undefined, staffIds: EntityId[], defaultRate: number | undefined) {
-  const fallbackRate = Number(defaultRate || 0);
-  if (!Number.isFinite(fallbackRate) || fallbackRate < 0) return null;
-  if (value === undefined) return new Map(staffIds.map((staffId) => [String(staffId), fallbackRate]));
+function normalizeStaffRates(value: Record<string, number> | undefined, staffIds: EntityId[]) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const selectedIds = new Set(staffIds.map(String));
   const rates = new Map<string, number>();
-  for (const [staffId, rawRate] of Object.entries(value)) {
-    const rate = Number(rawRate);
+  for (const [staffId, rate] of Object.entries(value)) {
     if (!validId(staffId) || !selectedIds.has(staffId) || !Number.isFinite(rate) || rate < 0) return null;
     rates.set(staffId, rate);
   }
-  for (const staffId of staffIds) {
-    if (!rates.has(String(staffId))) rates.set(String(staffId), fallbackRate);
-  }
+  if (staffIds.some((id) => !rates.has(String(id)))) return null;
   return rates;
+}
+
+function requiredStaffRate(rates: Map<string, number> | undefined, staffId: EntityId): number {
+  const rate = rates?.get(String(staffId));
+  if (rate === undefined) throw new ServiceError("Enter an hourly pay rate for every assigned cleaner", 400);
+  return rate;
 }
 
 function ensureStaffAssignments(job: JobRecord) {
@@ -180,14 +182,14 @@ function reconcileStaffAssignments(job: JobRecord, staffIds: EntityId[], staffRa
   });
   for (const staffId of staffIds) {
     if (!assignments.some((assignment) => referenceId(assignment.staff) === String(staffId))) {
-      job.staffAssignments.push(createStaffAssignment(staffId, job.estNoOfhours, job.staffHourRate));
+      job.staffAssignments.push(createStaffAssignment(staffId, job.estNoOfhours, requiredStaffRate(staffRates, staffId)));
     }
   }
   for (const assignment of job.staffAssignments.filter((item) => item.isAssigned !== false)) {
     assignment.estimatedHours = Number(job.estNoOfhours || 0);
     assignment.hourRate = staffRates
-      ? staffRates.get(referenceId(assignment.staff)) ?? Number(job.staffHourRate || 0)
-      : Number(assignment.hourRate ?? job.staffHourRate ?? 0);
+      ? requiredStaffRate(staffRates, referenceId(assignment.staff))
+      : assignment.hourRate;
     assignment.estimatedPayment = assignment.estimatedHours * assignment.hourRate;
     if (assignment.hours > 0) {
       const timeEntries = asList(assignment.timeEntries);
@@ -267,6 +269,7 @@ function presentJob(job: JobRecord | JobDocument, context: ActorContext, staffPr
     payoutBatchTotal: asList(assignment.timeEntries)
       .reduce((sum, entry) => sum + Number(entry.payoutAmount || 0), 0),
   }));
+  delete record.staffHourRate;
   if (!isStaffContext(context)) return record;
   for (const key of ["tenantId", "orgNoOfhours", "orgHourRate", "orgTotal", "staffHourRate", "staffPayTotal", "staffHoursTotal", "staffPaymentTotal", "payment", "paymentStatus", "noOfhours", "hourRate", "receivedPayments"] as const) {
     delete record[key];
@@ -309,7 +312,11 @@ const presentJobs = (jobs: JobRecord[], context: ActorContext, staffProfileId?: 
 async function attachPayrollProjection(presentedJobs: JobView[]) {
   const jobIds = presentedJobs.map((job) => job?._id).filter(Boolean);
   if (!jobIds.length) return presentedJobs;
-  const payouts = await StaffPayroll.find({ "entries.jobId": { $in: jobIds } }).select("staff entries").lean();
+  const [legacyPayouts, payments] = await Promise.all([
+    StaffPayroll.find({ "entries.jobId": { $in: jobIds } }).select("staff entries").lean(),
+    EmployeePayment.find({ status: "Paid", "entries.jobId": { $in: jobIds } }).select("employee entries").lean(),
+  ]);
+  const payouts = [...legacyPayouts, ...payments.map((payment) => ({ staff: payment.employee, entries: payment.entries }))];
   const totals = new Map<string, number>();
   for (const payout of payouts) {
     for (const entry of asList(payout.entries)) {
@@ -362,7 +369,7 @@ const dateBounds = (startDate: string | undefined, endDate: string | undefined) 
 export const addJob = async (context: ServiceContext<CreateJobInput>) => {
   const {
     jobName, description, client: clientId, assignedStaff, staffRates,
-    orgNoOfhours, orgHourRate, estNoOfhours, staffHourRate, notes, jobDate,
+    orgNoOfhours, orgHourRate, estNoOfhours, notes, jobDate,
   } = context.body || {};
   try {
     if (typeof jobName !== "string" || !jobName.trim() || typeof description !== "string" || !description.trim()) {
@@ -370,11 +377,11 @@ export const addJob = async (context: ServiceContext<CreateJobInput>) => {
     }
     const assignedStaffIds = normalizeAssignedStaff(assignedStaff);
     if (!validId(clientId) || !assignedStaffIds) return serviceResult(400, { message: "A valid client and at least one assigned staff member are required" });
-    const numericValues = [orgNoOfhours, orgHourRate, estNoOfhours, staffHourRate];
+    const numericValues = [orgNoOfhours, orgHourRate, estNoOfhours];
     if (numericValues.some((value) => !Number.isFinite(Number(value)) || Number(value) < 0)) {
       return serviceResult(400, { message: "Hour and rate values must be non-negative numbers" });
     }
-    const staffRateMap = normalizeStaffRates(staffRates, assignedStaffIds, staffHourRate);
+    const staffRateMap = normalizeStaffRates(staffRates, assignedStaffIds);
     if (!staffRateMap) return serviceResult(400, { message: "Enter a valid non-negative hourly rate for each assigned staff member" });
 
     const tenantId = await getTenantIdForUser(context.user);
@@ -389,11 +396,11 @@ export const addJob = async (context: ServiceContext<CreateJobInput>) => {
     if (staffMembers.length !== assignedStaffIds.length) return serviceResult(400, { message: "Only active Staff accounts within your access scope can be assigned to a job" });
 
     const orgTotal = Number(orgNoOfhours || 0) * Number(orgHourRate || 0);
-    const staffAssignments = assignedStaffIds.map((staffId) => createStaffAssignment(staffId, estNoOfhours, staffRateMap.get(String(staffId))));
+    const staffAssignments = assignedStaffIds.map((staffId) => createStaffAssignment(staffId, estNoOfhours, requiredStaffRate(staffRateMap, staffId)));
     const staffPayTotal = staffAssignments.reduce((total, assignment) => total + assignment.estimatedPayment, 0);
     const job = await Job.create({
       jobName: jobName.trim(), description: description.trim(), client: clientId, assignedStaff: assignedStaffIds,
-      staffAssignments, orgNoOfhours, orgHourRate, orgTotal, estNoOfhours, staffHourRate, staffPayTotal, payment: 0,
+      staffAssignments, orgNoOfhours, orgHourRate, orgTotal, estNoOfhours, staffPayTotal, payment: 0,
       notes, tenantId: client.tenantId, jobDate,
     });
     return serviceResult(201, { response_code: 201, success: true, message: "Job added successfully", job });
@@ -404,7 +411,7 @@ export const addJob = async (context: ServiceContext<CreateJobInput>) => {
 
 export const updatedJob = async (context: ServiceContext<UpdateJobInput, { id: string }>) => {
   const { id } = context.params;
-  const { jobName, description, client: clientId, assignedStaff, staffRates, orgNoOfhours, orgHourRate, estNoOfhours, staffHourRate, notes } = context.body || {};
+  const { jobName, description, client: clientId, assignedStaff, staffRates, orgNoOfhours, orgHourRate, estNoOfhours, notes } = context.body || {};
   try {
     const assignedStaffIds = assignedStaff === undefined ? undefined : normalizeAssignedStaff(assignedStaff);
     if (assignedStaff !== undefined && !assignedStaffIds) {
@@ -418,10 +425,10 @@ export const updatedJob = async (context: ServiceContext<UpdateJobInput, { id: s
       return serviceResult(409, { message: "The client cannot be changed after a client payment has been recorded" });
     }
     const currentStaffIds = assignedStaffIds || asList(job.assignedStaff).map(referenceId);
-    const staffRateMap = staffRates !== undefined || staffHourRate !== undefined
-      ? normalizeStaffRates(staffRates, currentStaffIds, staffHourRate ?? job.staffHourRate)
+    const staffRateMap = staffRates !== undefined || assignedStaffIds !== undefined
+      ? normalizeStaffRates(staffRates, currentStaffIds)
       : undefined;
-    if ((staffRates !== undefined || staffHourRate !== undefined) && !staffRateMap) {
+    if ((staffRates !== undefined || assignedStaffIds !== undefined) && !staffRateMap) {
       return serviceResult(400, { message: "Enter a valid non-negative hourly rate for each assigned staff member" });
     }
     if (staffRateMap) {
@@ -431,6 +438,8 @@ export const updatedJob = async (context: ServiceContext<UpdateJobInput, { id: s
         && Number(staffRateMap.get(referenceId(assignment.staff))) !== Number(assignment.hourRate || 0)
       );
       if (paidRateChange) return serviceResult(409, { message: "Hourly rates for paid staff records cannot be changed" });
+      const changedEmployees = ensureStaffAssignments(job).filter((assignment) => staffRateMap.has(referenceId(assignment.staff)) && staffRateMap.get(referenceId(assignment.staff)) !== assignment.hourRate).map((assignment) => referenceId(assignment.staff));
+      if (changedEmployees.length && await EmployeePayment.exists({ status: "Paid", employee: { $in: changedEmployees }, "entries.jobId": job._id })) return serviceResult(409, { message: "Hourly rates for paid staff records cannot be changed" });
     }
 
     if (clientId !== undefined || assignedStaff !== undefined) {
@@ -458,7 +467,7 @@ export const updatedJob = async (context: ServiceContext<UpdateJobInput, { id: s
         if (activeStaffSession) return serviceResult(409, { message: "Sign out staff before removing them from this job" });
       }
     }
-    const values = { jobName, description, client: clientId, assignedStaff: assignedStaffIds, orgNoOfhours, orgHourRate, estNoOfhours, staffHourRate, notes };
+    const values = { jobName, description, client: clientId, assignedStaff: assignedStaffIds, orgNoOfhours, orgHourRate, estNoOfhours, notes };
     job.set(Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)));
     const billingChanged = orgNoOfhours !== undefined || orgHourRate !== undefined;
     const updatedOrgTotal = billingChanged
@@ -469,7 +478,7 @@ export const updatedJob = async (context: ServiceContext<UpdateJobInput, { id: s
       return serviceResult(409, { message: "The job total cannot be reduced below the amount already received" });
     }
     job.orgTotal = updatedOrgTotal;
-    if (assignedStaffIds !== undefined || estNoOfhours !== undefined || staffHourRate !== undefined || staffRates !== undefined) {
+    if (assignedStaffIds !== undefined || estNoOfhours !== undefined || staffRates !== undefined) {
       reconcileStaffAssignments(job, currentStaffIds, staffRateMap || undefined);
     }
     await job.save();
@@ -484,6 +493,7 @@ export const deleteJobById = async (context: ServiceContext<Empty, { id: string 
   const scope = await tenantDataScope(context);
   const hasPayrollHistory = await StaffPayroll.exists({ "entries.jobId": context.params.id, ...scope });
   if (hasPayrollHistory) return serviceResult(409, { message: "Jobs with recorded staff payroll cannot be deleted" });
+  if (await EmployeePayment.exists({ "entries.jobId": context.params.id })) return serviceResult(409, { message: "Cancel pending payments first. Jobs with paid employee receipts cannot be deleted." });
   const deletedJob = await Job.findOneAndDelete({
     _id: context.params.id,
     ...scope,
@@ -1191,17 +1201,18 @@ function payrollPeriodFromRequest(context: { query: Pick<PayrollQuery, "startDat
   return { periodStart, periodEnd };
 }
 
-async function buildStaffPayrollPreview(staff: UserRecord, periodStart: Date, periodEnd: Date, scope: FilterQuery<JobRecord>): Promise<PayrollPreview> {
+export async function buildStaffPayrollPreview(staff: UserRecord, periodStart: Date, periodEnd: Date, scope: FilterQuery<JobRecord>, excludePaymentId?: EntityId): Promise<PayrollPreview> {
   const query = Job.find({ $and: [scope, { $or: [
       { assignedStaff: staff._id },
       { staffAssignments: { $elemMatch: { staff: staff._id } } },
     ] }] }).select("jobName jobDate assignedStaff staffAssignments");
-  const [jobs, priorPayouts] = await Promise.all([
+  const [jobs, priorPayouts, reservedPayments] = await Promise.all([
     query,
     StaffPayroll.find({ staff: staff._id }).select("entries").lean(),
+    EmployeePayment.find({ employee: staff._id, kind: "Work", ...(excludePaymentId ? { _id: { $ne: excludePaymentId } } : {}) }).select("entries").lean(),
   ]);
   const paidTimeEntries = new Map<string, PayrollLine>();
-  for (const payout of priorPayouts) {
+  for (const payout of [...priorPayouts, ...reservedPayments]) {
     for (const entry of asList(payout.entries)) {
       paidTimeEntries.set(`${referenceId(entry.jobId)}:${entry.timeEntryIndex}`, entry);
     }
@@ -1315,114 +1326,4 @@ export const getStaffPayroll = async (context: ServiceContext<Empty, { staffId: 
   }
 };
 
-export const recordStaffPayroll = async (context: ServiceContext<PayrollInput, { staffId: string }>) => {
-  const { periodStart: startValue, periodEnd: endValue, paymentDate, method, referenceNumber = "" } = context.body || {};
-  const periodStart = parsePayrollDay(startValue);
-  const periodEnd = parsePayrollDay(endValue, true);
-  const parsedPaymentDate = typeof paymentDate === "string" ? new Date(paymentDate) : null;
-  const validMethods = ["Cash", "Bank Transfer", "Card", "Cheque", "Other"];
-  if (!periodStart || !periodEnd || periodStart > periodEnd || periodEnd.getTime() - periodStart.getTime() > 366 * 86400000) {
-    return serviceResult(400, { message: "Enter a valid payroll period within a 12 month range" });
-  }
-  if (!parsedPaymentDate || Number.isNaN(parsedPaymentDate.getTime())) return serviceResult(400, { message: "A valid payment date is required" });
-  if (!validMethods.includes(method)) return serviceResult(400, { message: "Select a valid payment method" });
-  if (typeof referenceNumber !== "string" || referenceNumber.length > 120) {
-    return serviceResult(400, { message: "Reference must be text with no more than 120 characters" });
-  }
-
-  try {
-    const staff = await findPayrollStaff(context);
-    if (!staff) return serviceResult(404, { message: "Staff member not found" });
-    const scope = await jobScope(context);
-    const preview = await buildStaffPayrollPreview(staff, periodStart, periodEnd, scope);
-    if (!preview.entries.length || preview.totalAmount <= 0) {
-      return serviceResult(409, { message: "There is no unpaid completed work in this period" });
-    }
-
-    const payout = new StaffPayroll({
-      staff: staff._id,
-      tenantId: staff.tenantId,
-      payeeName: [staff.firstName, staff.lastName].filter(Boolean).join(" ") || "User",
-      payeeEmail: staff.email || "",
-      payeePhoneNumber: staff.phoneNumber || "",
-      payFrequency: staff.payFrequency || "Weekly",
-      periodStart,
-      periodEnd,
-      paymentDate: parsedPaymentDate,
-      method,
-      referenceNumber: referenceNumber.trim(),
-      amount: preview.totalAmount,
-      entries: preview.entries,
-      recordedBy: context.user._id,
-    });
-    payout.receiptNumber = `CC-PAY-${String(payout._id).slice(-8).toUpperCase()}`;
-    await payout.save();
-
-    // The payroll document is the authoritative receipt ledger. These job updates keep the
-    // existing job screens' paid status in sync; a failed projection cannot lose the payout.
-    let projectionSyncPending = false;
-    const jobsById = new Map<string, PayrollPreviewLine[]>();
-    for (const entry of preview.entries) {
-      const key = String(entry.jobId);
-      const jobEntries = jobsById.get(key) || [];
-      jobEntries.push(entry);
-      jobsById.set(key, jobEntries);
-    }
-    for (const [jobId, entries] of jobsById) {
-      try {
-        const job = await Job.findOne({ _id: jobId, ...scope });
-        if (!job) {
-          projectionSyncPending = true;
-          continue;
-        }
-        const assignment = ensureStaffAssignments(job).find((item) => referenceId(item.staff) === String(staff._id));
-        if (!assignment) {
-          projectionSyncPending = true;
-          continue;
-        }
-        for (const entry of entries) {
-          let timeEntry = assignment.timeEntries?.[entry.timeEntryIndex];
-          if (!timeEntry && entry.timeEntryIndex === 0 && !assignment.timeEntries?.length && assignment.signInTime) {
-            assignment.timeEntries.push({
-              signInTime: assignment.signInTime,
-              signOffTime: assignment.signOffTime,
-              description: "",
-              hours: Number(assignment.hours || 0),
-              hourRate: Number(assignment.hourRate || 0),
-              payoutAmount: 0,
-              payoutReceiptCredit: 0,
-              payoutBatchId: null,
-            });
-            timeEntry = assignment.timeEntries[0];
-          }
-          if (!timeEntry) {
-            projectionSyncPending = true;
-            continue;
-          }
-          timeEntry.payoutAmount = entry.amount;
-          timeEntry.payoutReceiptCredit = entry.receiptCreditApplied || 0;
-          timeEntry.payoutBatchId = payout._id;
-        }
-        const dueCents = Math.round(Number(assignment.payment || 0) * 100);
-        assignment.paymentStatus = getAssignmentPayrollPaidCents(assignment) >= dueCents ? "Done" : "Pending";
-        refreshJobTotals(job);
-        await job.save();
-      } catch {
-        projectionSyncPending = true;
-      }
-    }
-    return serviceResult(201, {
-      success: true,
-      message: "Staff payroll recorded successfully",
-      payout: payout.toObject(),
-      projectionSyncPending,
-    });
-  } catch (error) {
-    if (errorCode(error) === 11000) return serviceResult(409, { message: "One or more shifts in this period have already been paid. Refresh the payroll preview." });
-    if (errorName(error) === "VersionError" || errorCode(error) === 112) return serviceResult(409, { message: "Payroll data changed while this payout was being recorded. Refresh and try again." });
-    const status = errorStatus(error);
-    if (status) return serviceResult(status, { message: errorMessage(error) });
-    if (errorName(error) === "ValidationError") return serviceResult(400, { message: errorMessage(error) });
-    throw error;
-  }
-};
+export const recordStaffPayroll = async (_context: ServiceContext<PayrollInput, { staffId: string }>) => serviceResult(410, { message: "Use Employee Payments to prepare a payment and mark it as paid" });

@@ -42,7 +42,7 @@ export const jobPayload = {
   orgNoOfhours: "4",
   orgHourRate: "30",
   estNoOfhours: "3",
-  staffHourRate: "20",
+
   staffRates: { [staffId]: "22.50" },
   jobDate: "2026-11-13T11:57",
   notes: "",

@@ -15,6 +15,7 @@ import jobRoutes from "./routes/jobRoute.js";
 import userRoutes from "./routes/userRoute.js";
 import invoiceRoutes from "./routes/invoiceRoute.js";
 import roleRoutes from "./routes/roleRoute.js";
+import paymentRoutes from "./routes/employeePaymentRoute.js";
 const app = express();
 
 app.disable("x-powered-by");
@@ -45,6 +46,7 @@ app.use("/api/job", jobRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/invoice", invoiceRoutes);
 app.use("/api/roles", roleRoutes);
+app.use("/api/payments", paymentRoutes);
 
 app.use(errorHandler);
 

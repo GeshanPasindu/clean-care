@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
 import { loginBodySchema } from "../validation/auth.js";
-import { createClientBodySchema } from "../validation/client.js";
+import {
+  createClientBodySchema,
+  updateClientBodySchema,
+} from "../validation/client.js";
 import {
   createInvoiceBodySchema,
   invoiceListQuerySchema,
@@ -59,6 +62,9 @@ test("invalid assignment IDs, duplicate staff, rates, and dates are rejected", (
     { orgHourRate: -1 },
     { orgHourRate: true },
     { orgNoOfhours: "" },
+    { staffRates: undefined },
+    { staffRates: {} },
+    { staffRates: { [staffId]: -1 } },
     { staffRates: { [staffId]: "Infinity" } },
     { staffRates: { invalid: "20" } },
     { staffRates: { [roleId]: "20" } },
@@ -236,6 +242,27 @@ test("login, attendance, client, invoice, and role inputs validate their contrac
     createClientBodySchema.safeParse({ email: "bad" }).success,
     false,
   );
+  const clientWithoutLastName = {
+    firstName: "Acme",
+    email: "client@example.com",
+    address: "Main street",
+    phoneNumber: "01234",
+  };
+  assert.equal(
+    createClientBodySchema.parse(clientWithoutLastName).lastName,
+    "",
+  );
+  assert.equal(
+    createClientBodySchema.parse({ ...clientWithoutLastName, lastName: "" })
+      .lastName,
+    "",
+  );
+  assert.deepEqual(updateClientBodySchema.parse({ firstName: "Acme" }), {
+    firstName: "Acme",
+  });
+  assert.deepEqual(updateClientBodySchema.parse({ lastName: "" }), {
+    lastName: "",
+  });
   assert.equal(
     createInvoiceBodySchema.safeParse({
       invoiceTitle: "Invoice",
@@ -279,4 +306,28 @@ test("route IDs are validated and GET requests support an absent body", () => {
     () => schema.parse({ body: {}, params: { id: "bad" }, query: {} }),
     z.ZodError,
   );
+});
+
+test("job updates require explicit rates when assignments change", () => {
+  assert.equal(
+    updateJobBodySchema.safeParse({ assignedStaff: [staffId] }).success,
+    false,
+  );
+  assert.equal(
+    updateJobBodySchema.safeParse({
+      assignedStaff: [staffId, roleId],
+      staffRates: { [staffId]: 20 },
+    }).success,
+    false,
+  );
+  assert.equal(
+    updateJobBodySchema.safeParse({
+      assignedStaff: [staffId, roleId],
+      staffRates: { [staffId]: 20, [roleId]: 30 },
+    }).success,
+    true,
+  );
+  assert.deepEqual(updateJobBodySchema.parse({ notes: "Notes only" }), {
+    notes: "Notes only",
+  });
 });

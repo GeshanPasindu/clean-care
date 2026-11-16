@@ -45,6 +45,9 @@ export type UserReference = Types.ObjectId | UserIdentity;
 export interface UserRecord extends Entity, UserIdentity {
   userName: string;
   password: string;
+  mustChangePassword: boolean;
+  firstLoginTokenHash?: string;
+  firstLoginExpiresAt?: Date;
   email: string;
   role: Types.ObjectId | RoleRecord;
   status: AccountStatus;
@@ -69,7 +72,7 @@ export interface UserRecord extends Entity, UserIdentity {
 export type UserDocument = HydratedDocument<UserRecord>;
 export interface UserView extends Omit<
   UserRecord,
-  "password" | "role" | "tenantId" | "bankAcNo" | "bankName" | "bankAcBranch"
+  "password" | "firstLoginTokenHash" | "firstLoginExpiresAt" | "role" | "tenantId" | "bankAcNo" | "bankName" | "bankAcBranch"
 > {
   roleId: string;
   role: string;
@@ -179,6 +182,7 @@ export interface JobRecord extends Entity {
   orgHourRate?: number;
   orgTotal?: number;
   estNoOfhours?: number;
+  /** Historical records only; new assignments each carry their own hourRate. */
   staffHourRate?: number;
   staffPayTotal?: number;
   staffHoursTotal?: number;

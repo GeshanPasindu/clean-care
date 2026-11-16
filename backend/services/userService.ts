@@ -14,6 +14,7 @@ import { hashPassword } from "./credentialService.js";
 import { getRolePermissionKeys, roleScope } from "./authorizationService.js";
 import { ServiceError } from "./serviceError.js";
 import { revokeUserSessions } from "./sessionService.js";
+import { createFirstLoginInvitation } from "./firstLoginService.js";
 
 const profileFields = ["firstName", "lastName", "address", "phoneNumber", "dateOfBirth", "position"] as const;
 const employeeFields = [
@@ -26,7 +27,7 @@ const selfEditableFields = [
 const readableFields = [
   "_id", "userName", "email", "role", "status", "firstName", "lastName", "address", "phoneNumber", "dateOfBirth",
   "position", "dateOfHire", "empContactName", "empPhoneNumber", "bankAcNo", "bankName", "bankAcBranch", "payFrequency",
-  "notes", "activeJob", "tenantId", "isDeleted", "deletedAt", "deletedBy", "createdAt", "updatedAt",
+  "notes", "activeJob", "tenantId", "isDeleted", "deletedAt", "deletedBy", "createdAt", "updatedAt", "mustChangePassword",
 ].join(" ");
 const validId = (value: unknown) => validator.isMongoId(String(value || ""));
 const parsePage = (value: number | undefined, fallback: number, max: number) => {
@@ -70,10 +71,10 @@ async function presentUser(user: UserRecord | UserDocument, actor: Authenticated
   const role = await populateRole(user);
   if (!role) return null;
   const raw = user instanceof mongoose.Document ? user.toObject<UserRecord>() : user;
-  const { password: _password, ...fields } = raw;
+  const { password: _password, firstLoginTokenHash: _tokenHash, firstLoginExpiresAt: _expiresAt, ...fields } = raw;
   const result: UserView = {
     ...fields, roleId: String(role._id), role: role.key, roleName: role.name, scope: role.scope,
-    isPlatformAdmin: role.scope === "platform", tenantId: raw.tenantId ? String(raw.tenantId) : null,
+    isPlatformAdmin: role.scope === "platform", tenantId: raw.tenantId ? String(raw.tenantId) : null, mustChangePassword: Boolean(raw.mustChangePassword),
   };
   if (role.scope === "staff" && result.tenantId) {
     const supervisor = await User.findById(result.tenantId).select("_id userName firstName lastName").lean();
@@ -154,6 +155,7 @@ export const userService = {
     }
     const tenantId = await assignedTenantForCreate(role, body, actor);
     const accountData = fieldsFrom(body, [...profileFields, ...employeeFields]);
+    const { invitation, tokenHash } = createFirstLoginInvitation();
 
     try {
       const user = await User.create({
@@ -161,6 +163,9 @@ export const userService = {
         userName: body.userName.trim(),
         email,
         password: await hashPassword(body.password),
+        mustChangePassword: true,
+        firstLoginTokenHash: tokenHash,
+        firstLoginExpiresAt: invitation.expiresAt,
         role: role._id,
         status: "active",
         tenantId,
@@ -169,11 +174,29 @@ export const userService = {
         user.tenantId = user._id;
         await user.save();
       }
-      return presentUser(user, actor);
+      return { user: await presentUser(user, actor), invitation };
     } catch (error) {
       if (errorCode(error) === 11000) throw new ServiceError("An account with this email already exists", 409);
       throw error;
     }
+  },
+
+  async replaceFirstLoginInvitation(id: string, password: string, actor: AuthenticatedUser) {
+    if (!actor.permissions.includes("users.password.reset")) {
+      throw new ServiceError("Access denied", 403);
+    }
+    const user = await findManagedUser(id, actor);
+    if (user._id.toString() === actor._id || !user.mustChangePassword || user.status !== "active" || !user.role.isActive) {
+      throw new ServiceError("Only active accounts awaiting first login can receive replacement credentials", 409);
+    }
+    const { invitation, tokenHash } = createFirstLoginInvitation();
+    const replaced = await User.findOneAndUpdate(
+      { _id: user._id, role: user.role._id, tenantId: user.tenantId, mustChangePassword: true, status: "active", isDeleted: false },
+      { $set: { password: await hashPassword(password), firstLoginTokenHash: tokenHash, firstLoginExpiresAt: invitation.expiresAt } },
+      { new: true, runValidators: true },
+    ).select("_id");
+    if (!replaced) throw new ServiceError("Account changed. Refresh and try again.", 409);
+    return { invitation };
   },
 
   async getById(id: string, actor: AuthenticatedUser) {
@@ -378,6 +401,11 @@ export const userService = {
       throw new ServiceError("Use the current-password change endpoint for your own account", 403);
     }
     user.password = await hashPassword(password);
+    user.firstLoginTokenHash = undefined;
+    user.firstLoginExpiresAt = undefined;
+    // These private paths are normally unselected; ensure their removal is saved.
+    user.markModified("firstLoginTokenHash");
+    user.markModified("firstLoginExpiresAt");
     await user.save();
     await revokeUserSessions(user._id);
   },

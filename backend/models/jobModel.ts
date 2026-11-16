@@ -180,6 +180,7 @@ const jobSchema = new Schema<JobRecord>(
             type: Number,
             required: false,
         },
+        // Read historical jobs only. New jobs store hourly pay on staffAssignments.
         staffHourRate: {
             type: Number,
             required: false,

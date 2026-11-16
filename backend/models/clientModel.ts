@@ -12,7 +12,8 @@ const clientSchema = new Schema<ClientRecord>(
         },
         lastName: {
             type: String,
-            required: true,
+            required: false,
+            default: "",
         },
         email: {
             type: String,

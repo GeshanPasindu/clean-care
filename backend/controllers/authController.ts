@@ -8,7 +8,12 @@ import { ServiceError } from "../services/serviceError.js";
 import type { HttpHandler, HttpRequest } from "../types/http.js";
 import { validatedController } from "../middleware/validatedController.js";
 import { requestSchema, emptySchema } from "../validation/common.js";
-import { loginBodySchema, refreshCookiesSchema } from "../validation/auth.js";
+import {
+  loginBodySchema,
+  refreshCookiesSchema,
+  completeFirstLoginSchema,
+} from "../validation/auth.js";
+import { firstLoginService } from "../services/firstLoginService.js";
 
 function refreshCookie(request: HttpRequest): string | undefined {
   const cookies: unknown = request.cookies;
@@ -28,33 +33,51 @@ export const login: HttpHandler = async (req, res) => {
   );
   if (!user)
     return res.status(401).json({ message: "Invalid email or password" });
+  if (user.mustChangePassword)
+    return res
+      .status(403)
+      .json({
+        code: "FIRST_LOGIN_REQUIRED",
+        message:
+          "Open your first-login invitation and change your temporary password before signing in. Ask your administrator for replacement credentials if the link has expired.",
+      });
   const session = await authService.createSession(user, {
     userAgent: req.get("user-agent"),
     ipAddress: req.ip,
   });
   setRefreshCookie(res, session);
-  return res
-    .status(200)
-    .json({
-      success: true,
-      accessToken: session.accessToken,
-      user: session.user,
-    });
+  return res.status(200).json({
+    success: true,
+    accessToken: session.accessToken,
+    user: session.user,
+  });
 };
 
 const emptyRequest = requestSchema(emptySchema, emptySchema, emptySchema);
+export const completeFirstLogin: HttpHandler = async (req, res) => {
+  const input = requestSchema(
+    completeFirstLoginSchema,
+    emptySchema,
+    emptySchema,
+  ).parse({ body: req.body, params: req.params, query: req.query });
+  await firstLoginService.complete(input.body);
+  clearRefreshCookie(res);
+  return res.json({
+    success: true,
+    message:
+      "Your password has been set. Sign in with your email and new password.",
+  });
+};
 export const refresh: HttpHandler = async (req, res, next) => {
   emptyRequest.parse({ body: req.body, params: req.params, query: req.query });
   try {
     const session = await authService.refresh(refreshCookie(req));
     setRefreshCookie(res, session);
-    return res
-      .status(200)
-      .json({
-        success: true,
-        accessToken: session.accessToken,
-        user: session.user,
-      });
+    return res.status(200).json({
+      success: true,
+      accessToken: session.accessToken,
+      user: session.user,
+    });
   } catch (error) {
     if (error instanceof ServiceError && error.statusCode === 401) {
       clearRefreshCookie(res);

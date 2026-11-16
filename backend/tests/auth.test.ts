@@ -5,6 +5,8 @@ import jwt from "jsonwebtoken";
 import { authService } from "../services/authService.js";
 import { account } from "./fixtures.js";
 import { serve } from "./http.js";
+import User from "../models/userModel.js";
+import { firstLoginService } from "../services/firstLoginService.js";
 
 process.env.ACCESS_TOKEN_SECRET = "test-only-access-token-secret-32-characters";
 process.env.FRONTEND_ORIGINS = "http://localhost:3000";
@@ -133,4 +135,77 @@ test("untrusted origins cannot invoke authentication services", async (context) 
   });
   assert.equal(response.status, 403);
   assert.equal(refresh.mock.callCount(), 0);
+});
+
+test("valid temporary credentials require first-login setup without creating a full session", async (context) => {
+  context.mock.method(
+    authService,
+    "authenticateLocal",
+    async () => new User({ mustChangePassword: true }),
+  );
+  const create = context.mock.method(
+    authService,
+    "createSession",
+    async () => session,
+  );
+  const response = await fetch(`${endpoint.url}/api/auth/login`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      email: "new@example.com",
+      password: "temporary-password",
+    }),
+  });
+  assert.equal(response.status, 403);
+  assert.equal(create.mock.callCount(), 0);
+  assert.equal(response.headers.get("set-cookie"), null);
+  const result: unknown = await response.json();
+  assert.ok(
+    result &&
+      typeof result === "object" &&
+      "code" in result &&
+      result.code === "FIRST_LOGIN_REQUIRED" &&
+      !("accessToken" in result),
+  );
+});
+
+test("first-login endpoint validates before services, checks origins, and returns no session tokens", async (context) => {
+  const complete = context.mock.method(
+    firstLoginService,
+    "complete",
+    async () => {},
+  );
+  const body = JSON.stringify({
+    token: "A".repeat(43),
+    temporaryPassword: "temporary-password",
+    newPassword: "employee-new-password",
+  });
+  const bad = await fetch(`${endpoint.url}/api/auth/first-login`, {
+    method: "POST",
+    headers,
+    body: "{}",
+  });
+  assert.equal(bad.status, 400);
+  const untrusted = await fetch(`${endpoint.url}/api/auth/first-login`, {
+    method: "POST",
+    headers: { ...headers, Origin: "https://untrusted.example" },
+    body,
+  });
+  assert.equal(untrusted.status, 403);
+  assert.equal(complete.mock.callCount(), 0);
+  const good = await fetch(`${endpoint.url}/api/auth/first-login`, {
+    method: "POST",
+    headers,
+    body,
+  });
+  assert.equal(good.status, 200);
+  assert.equal(complete.mock.callCount(), 1);
+  assert.equal(good.headers.get("cache-control"), "no-store");
+  const result: unknown = await good.json();
+  assert.ok(
+    result &&
+      typeof result === "object" &&
+      !("accessToken" in result) &&
+      !("refreshToken" in result),
+  );
 });

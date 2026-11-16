@@ -22,7 +22,7 @@ export const clientService = {
     const fields = selectClientFields(body);
     const tenantId = await getTenantIdForUser(user);
     if (!tenantId) throw new ServiceError("A tenant account is required to create clients", 403);
-    if (!fields.firstName || !fields.lastName || !fields.email || !fields.address || !fields.phoneNumber) {
+    if (!fields.firstName || !fields.email || !fields.address || !fields.phoneNumber) {
       throw new ServiceError("Client name, email, address, and phone are required", 400);
     }
     if (typeof fields.email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email)) {

@@ -26,14 +26,29 @@ export const createUser = handle(
     const result = await userService.create(input.body, user);
     return res
       .status(201)
+      .set("Cache-Control", "no-store")
       .json({
         success: true,
         message: "User created successfully",
-        user: result,
+        ...result,
       });
   },
 );
 
+export const replaceFirstLoginInvitation = handle(
+  request(resetPasswordBodySchema, id, empty),
+  async (input, user, _req, res) =>
+    res
+      .set("Cache-Control", "no-store")
+      .json({
+        success: true,
+        ...(await userService.replaceFirstLoginInvitation(
+          input.params.id,
+          input.body.password,
+          user,
+        )),
+      }),
+);
 export const getUser = handle(
   request(empty, id, empty),
   async (input, user, _req, res) => {
@@ -78,13 +93,11 @@ export const updateUser = handle(
   request(updateUserBodySchema, id, empty),
   async (input, user, _req, res) => {
     const result = await userService.update(input.params.id, input.body, user);
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "User updated successfully",
-        user: result,
-      });
+    return res.status(200).json({
+      success: true,
+      message: "User updated successfully",
+      user: result,
+    });
   },
 );
 
@@ -96,13 +109,11 @@ export const changeUserRole = handle(
       input.body,
       user,
     );
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "User role updated successfully",
-        user: result,
-      });
+    return res.status(200).json({
+      success: true,
+      message: "User role updated successfully",
+      user: result,
+    });
   },
 );
 
@@ -110,13 +121,11 @@ export const updateMe = handle(
   request(updateProfileBodySchema, empty, empty),
   async (input, user, _req, res) => {
     const result = await userService.updateSelf(user, input.body);
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "Profile updated successfully",
-        user: result,
-      });
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      user: result,
+    });
   },
 );
 
@@ -138,12 +147,10 @@ export const resetUserPassword = handle(
   request(resetPasswordBodySchema, id, empty),
   async (input, user, _req, res) => {
     await userService.resetPassword(input.params.id, input.body.password, user);
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "Password updated. The user must sign in again.",
-      });
+    return res.status(200).json({
+      success: true,
+      message: "Password updated. The user must sign in again.",
+    });
   },
 );
 
@@ -156,12 +163,10 @@ export const changeOwnPassword = handle(
       input.body.newPassword,
     );
     clearRefreshCookie(res);
-    return res
-      .status(200)
-      .json({
-        success: true,
-        message: "Password updated. Please sign in again.",
-      });
+    return res.status(200).json({
+      success: true,
+      message: "Password updated. Please sign in again.",
+    });
   },
 );
 

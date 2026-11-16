@@ -10,6 +10,7 @@ import {
   getUser,
   getUserCount,
   resetUserPassword,
+  replaceFirstLoginInvitation,
   restoreUser,
   updateMe,
   updateUser,
@@ -35,6 +36,7 @@ router.put("/:id", requirePermissions("users.update"), requireUserRecordAccess("
 router.patch("/:id/role", requirePermissions("users.assignRole"), requireUserRecordAccess("id"), requireTrustedOrigin, asyncHandler(changeUserRole));
 router.patch("/:id/status", requirePermissions("users.status.update"), requireUserRecordAccess("id"), requireTrustedOrigin, asyncHandler(updateUserStatus));
 router.put("/:id/password", requirePermissions("users.password.reset"), requireUserRecordAccess("id"), requireTrustedOrigin, asyncHandler(resetUserPassword));
+router.post("/:id/first-login-invitation", requirePermissions("users.password.reset"), requireUserRecordAccess("id"), requireTrustedOrigin, asyncHandler(replaceFirstLoginInvitation));
 router.post("/:id/restore", requirePermissions("users.restore"), requireTrustedOrigin, asyncHandler(restoreUser));
 router.delete("/:id", requirePermissions("users.delete"), requireUserRecordAccess("id"), requireTrustedOrigin, asyncHandler(deleteUser));
 

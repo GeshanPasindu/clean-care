@@ -6,8 +6,12 @@ import type * as job from "../validation/job.js";
 import type * as role from "../validation/role.js";
 import type * as user from "../validation/user.js";
 import type * as common from "../validation/common.js";
+import type * as payments from "../validation/payments.js";
 
 export type LoginInput = z.output<typeof auth.loginBodySchema>;
+export type CompleteFirstLoginInput = z.output<
+  typeof auth.completeFirstLoginSchema
+>;
 export type AccessTokenPayload = z.output<typeof auth.accessTokenPayloadSchema>;
 export type CreateUserInput = z.output<typeof user.createUserBodySchema>;
 export type UpdateUserInput = z.output<typeof user.updateUserBodySchema>;
@@ -38,3 +42,10 @@ export type StaffPayoutInput = z.output<typeof job.staffPayoutBodySchema>;
 export type PayrollInput = z.output<typeof job.payrollBodySchema>;
 export type SignInInput = z.output<typeof job.signInBodySchema>;
 export type SignOffInput = z.output<typeof job.signOffBodySchema>;
+export type PreparePaymentInput = z.output<
+  typeof payments.preparePaymentSchema
+>;
+export type SalaryPlanInput = z.output<typeof payments.salaryPlanSchema>;
+export type MarkPaidInput = z.output<typeof payments.markPaidSchema>;
+export type EmployeeListQuery = z.output<typeof payments.employeeListSchema>;
+export type PaymentListQuery = z.output<typeof payments.paymentListSchema>;

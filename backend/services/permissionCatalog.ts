@@ -42,6 +42,9 @@ export const permissionCatalog = [
   ["payroll.read", "View staff payroll", "Payroll"],
   ["payroll.self.read", "View own payment history", "Payroll"],
   ["payroll.record", "Record staff payroll", "Payroll"],
+  ["salaries.read", "View supervisor salaries and payments", "Payroll"],
+  ["salaries.manage", "Configure supervisor salaries", "Payroll"],
+  ["salaries.record", "Record supervisor salary payments", "Payroll"],
   ["staff.payout.record", "Record staff payouts", "Payroll"],
   ["clients.payment.record", "Record client payments", "Payments"],
   ["profile.read", "View own profile", "Profile"],
@@ -52,7 +55,7 @@ export const permissionCatalog = [
 const allKeys = permissionCatalog.map(([key]) => key);
 
 export const builtInRoles: RoleDefinition[] = [
-  { key: "superadmin", name: "Super Admin", description: "Platform-wide administrator", scope: "platform", permissions: allKeys },
+  { key: "superadmin", name: "Super Admin", description: "Platform-wide administrator", scope: "platform", permissions: allKeys.filter((key) => key !== "payroll.self.read") },
   {
     key: "admin", name: "Admin", description: "Tenant administrator", scope: "tenant",
     permissions: [
@@ -68,6 +71,6 @@ export const builtInRoles: RoleDefinition[] = [
   },
   {
     key: "staff", name: "Staff", description: "Staff member with access to assigned work", scope: "staff",
-    permissions: ["jobs.read", "jobs.attendance.sign", "timesheets.read", "payroll.read", "payroll.self.read", "profile.read", "profile.update", "auth.password.change"],
+    permissions: ["jobs.read", "jobs.attendance.sign", "timesheets.read", "payroll.self.read", "profile.read", "profile.update", "auth.password.change"],
   },
 ];

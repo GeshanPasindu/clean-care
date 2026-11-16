@@ -7,6 +7,9 @@ const { Schema } = mongoose;
 const userSchema = new Schema<UserRecord>({
   userName: { type: String, required: true, trim: true, maxlength: 120 },
   password: { type: String, required: true, select: false },
+  mustChangePassword: { type: Boolean, default: false, required: true },
+  firstLoginTokenHash: { type: String, select: false, index: true, sparse: true },
+  firstLoginExpiresAt: { type: Date, select: false },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },
   role: { type: Schema.Types.ObjectId, ref: "Role", required: true, index: true },
   status: { type: String, enum: [...accountStatuses], default: "active", required: true },

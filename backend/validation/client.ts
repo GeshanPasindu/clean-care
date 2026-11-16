@@ -6,9 +6,11 @@ import {
   queryIntegerSchema,
 } from "./common.js";
 
+const clientLastNameSchema = z.string().trim().max(100);
+
 export const createClientBodySchema = z.object({
   firstName: z.string().trim().min(1).max(100),
-  lastName: z.string().trim().min(1).max(100),
+  lastName: clientLastNameSchema.default(""),
   email: emailSchema,
   address: z.string().trim().min(1).max(500),
   phoneNumber: z.string().trim().min(1).max(40),
@@ -18,7 +20,9 @@ export const createClientBodySchema = z.object({
   accountManager: z.string().trim().max(160).optional(),
   notes: z.string().trim().max(2000).optional(),
 });
-export const updateClientBodySchema = createClientBodySchema.partial();
+export const updateClientBodySchema = createClientBodySchema.partial().extend({
+  lastName: clientLastNameSchema.optional(),
+});
 export const clientStatusBodySchema = z.object({
   clientStatus: accountStatusSchema,
 });

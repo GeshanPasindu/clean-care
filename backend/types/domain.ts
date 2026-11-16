@@ -11,7 +11,7 @@ export const paymentMethods = [
   "Cheque",
   "Other",
 ] as const;
-export const payFrequencies = ["Weekly", "Monthly"] as const;
+export const payFrequencies = ["Daily", "PerJob", "Weekly", "Monthly"] as const;
 export type RoleScope = (typeof roleScopes)[number];
 export type AccountStatus = (typeof accountStatuses)[number];
 export type JobStatus = (typeof jobStatuses)[number];

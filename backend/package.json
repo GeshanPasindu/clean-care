@@ -13,7 +13,8 @@
     "auth:create-super-admin": "tsx scripts/createSuperAdmin.ts",
     "auth:reset-password": "tsx scripts/resetUserPassword.ts",
     "auth:seed-access-control": "tsx scripts/seedAccessControl.ts",
-    "auth:purge-deleted-users": "tsx scripts/purgeDeletedUsers.ts"
+    "auth:purge-deleted-users": "tsx scripts/purgeDeletedUsers.ts",
+    "auth:seed-payment-permissions": "tsx scripts/seedPaymentPermissions.ts"
   },
   "author": "",
   "license": "ISC",

@@ -26,11 +26,10 @@ const jobBodySchema = z.object({
   description: z.string().trim().min(1).max(10000),
   client: objectIdSchema,
   assignedStaff: assignedStaffSchema,
-  staffRates: z.record(objectIdSchema, nonNegativeNumberSchema).optional(),
+  staffRates: z.record(objectIdSchema, nonNegativeNumberSchema),
   orgNoOfhours: nonNegativeNumberSchema,
   orgHourRate: nonNegativeNumberSchema,
   estNoOfhours: nonNegativeNumberSchema,
-  staffHourRate: nonNegativeNumberSchema,
   notes: z.string().trim().max(2000).optional(),
   jobDate: optionalDateSchema,
 });
@@ -38,9 +37,17 @@ function validateStaffRates(
   value: { assignedStaff?: string[]; staffRates?: Record<string, number> },
   context: z.RefinementCtx,
 ): void {
-  if (!value.assignedStaff || !value.staffRates) return;
+  if (!value.assignedStaff) return;
+  for (const id of value.assignedStaff) {
+    if (value.staffRates?.[id] === undefined)
+      context.addIssue({
+        code: "custom",
+        path: ["staffRates", id],
+        message: "Enter this cleaner's hourly pay",
+      });
+  }
   const selected = new Set(value.assignedStaff);
-  for (const id of Object.keys(value.staffRates)) {
+  for (const id of Object.keys(value.staffRates || {})) {
     if (!selected.has(id))
       context.addIssue({
         code: "custom",

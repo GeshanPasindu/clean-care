@@ -11,6 +11,16 @@ export const changePasswordBodySchema = z.object({
   currentPassword: z.string().min(1).max(256),
   newPassword: passwordSchema,
 });
+export const completeFirstLoginSchema = z
+  .object({
+    token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    temporaryPassword: z.string().min(1).max(128),
+    newPassword: passwordSchema,
+  })
+  .refine((value) => value.newPassword !== value.temporaryPassword, {
+    path: ["newPassword"],
+    message: "Choose a different password from the temporary password",
+  });
 export const accessTokenPayloadSchema = z.object({
   sub: objectIdSchema,
   sid: objectIdSchema,

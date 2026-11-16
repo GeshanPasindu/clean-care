@@ -20,3 +20,4 @@ export const authLimiter = rateLimit(
 export const loginLimiter = rateLimit(
   rateLimitOptions(10, "Too many sign-in attempts. Try again later.")
 );
+export const firstLoginLimiter = rateLimit(rateLimitOptions(10, "Too many first-login attempts. Try again later."));

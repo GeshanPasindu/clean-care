@@ -7,9 +7,9 @@ import Client from "../models/clientModel.js";
 import Role from "../models/roleModel.js";
 import User from "../models/userModel.js";
 import type { UserRecord, RoleRecord } from "../types/models.js";
-import { addJob } from "../services/jobService.js";
+import { addJob, updatedJob } from "../services/jobService.js";
 import { jobScope } from "../services/authorizationService.js";
-import { createJobBodySchema } from "../validation/job.js";
+import { createJobBodySchema, updateJobBodySchema } from "../validation/job.js";
 import {
   account,
   actorId,
@@ -57,6 +57,128 @@ test("job creation uses Staff roles and the client owner for tenant assignment",
   assert.equal(String(saved[0]?.tenantId), String(clientOwner));
   assert.equal(saved[0]?.staffAssignments[0]?.hourRate, 22.5);
   assert.equal(saved[0]?.staffPayTotal, 67.5);
+  assert.equal(Object.hasOwn(saved[0] || {}, "staffHourRate"), false);
+});
+
+test("a job calculates each cleaner's pay separately from the client's charge", async (context) => {
+  const secondStaffId = "507f1f77bcf86cd799439015";
+  context.mock.method(Role, "find", () => ({
+    select: () => ({ lean: async () => [{ _id: new Types.ObjectId(roleId) }] }),
+  }));
+  context.mock.method(Client, "findOne", () => ({
+    select: async () => ({
+      _id: new Types.ObjectId(clientId),
+      tenantId: new Types.ObjectId(actorId),
+    }),
+  }));
+  context.mock.method(User, "find", () => ({
+    select: async () => [
+      { _id: new Types.ObjectId(staffId) },
+      { _id: new Types.ObjectId(secondStaffId) },
+    ],
+  }));
+  const saved: JobRecordForTest[] = [];
+  context.mock.method(Job, "create", async (data: JobRecordForTest) => {
+    saved.push(data);
+    return new Job(data);
+  });
+  const result = await addJob({
+    user: account(),
+    body: createJobBodySchema.parse({
+      ...jobPayload,
+      assignedStaff: [staffId, secondStaffId],
+      staffRates: { [staffId]: 20, [secondStaffId]: 30 },
+    }),
+    params: {},
+    query: {},
+  });
+  assert.equal(result.statusCode, 201);
+  assert.deepEqual(
+    saved[0]?.staffAssignments.map(({ hourRate, estimatedPayment }) => ({
+      hourRate,
+      estimatedPayment,
+    })),
+    [
+      { hourRate: 20, estimatedPayment: 60 },
+      { hourRate: 30, estimatedPayment: 90 },
+    ],
+  );
+  assert.equal(saved[0]?.staffPayTotal, 150);
+});
+
+function existingJob() {
+  return new Job({
+    ...createJobBodySchema.parse(jobPayload),
+    _id: new Types.ObjectId(clientId),
+    tenantId: new Types.ObjectId(actorId),
+    staffAssignments: [
+      {
+        staff: staffId,
+        hourRate: 22.5,
+        estimatedHours: 3,
+        estimatedPayment: 67.5,
+        hours: 2,
+        payment: 40,
+        timeEntries: [
+          {
+            signInTime: new Date("2026-11-13T03:00:00Z"),
+            signOffTime: new Date("2026-11-13T05:00:00Z"),
+            hours: 2,
+            hourRate: 20,
+          },
+        ],
+      },
+    ],
+  });
+}
+
+test("editing estimates preserves the cleaner's rate and recorded shift pay", async (context) => {
+  const job = existingJob();
+  context.mock.method(Job, "findOne", async () => job);
+  const save = context.mock.method(job, "save", async () => job);
+  const result = await updatedJob({
+    user: account(),
+    body: updateJobBodySchema.parse({ estNoOfhours: 5 }),
+    params: { id: clientId },
+    query: {},
+  });
+  assert.equal(result.statusCode, 200);
+  assert.equal(save.mock.callCount(), 1);
+  assert.equal(job.staffAssignments[0]?.hourRate, 22.5);
+  assert.equal(job.staffAssignments[0]?.estimatedPayment, 112.5);
+  assert.equal(job.staffAssignments[0]?.timeEntries[0]?.hourRate, 20);
+  assert.equal(job.staffAssignments[0]?.payment, 40);
+});
+
+test("paid cleaner rates cannot be changed", async (context) => {
+  const job = existingJob();
+  job.staffAssignments[0].paymentStatus = "Done";
+  context.mock.method(Job, "findOne", async () => job);
+  const save = context.mock.method(job, "save", async () => job);
+  const result = await updatedJob({
+    user: account(),
+    body: updateJobBodySchema.parse({ staffRates: { [staffId]: 30 } }),
+    params: { id: clientId },
+    query: {},
+  });
+  assert.equal(result.statusCode, 409);
+  assert.equal(save.mock.callCount(), 0);
+  assert.equal(job.staffAssignments[0]?.hourRate, 22.5);
+});
+
+test("a rate update cannot omit a currently assigned cleaner", async (context) => {
+  const job = existingJob();
+  context.mock.method(Job, "findOne", async () => job);
+  const save = context.mock.method(job, "save", async () => job);
+  const result = await updatedJob({
+    user: account(),
+    body: updateJobBodySchema.parse({ staffRates: {} }),
+    params: { id: clientId },
+    query: {},
+  });
+  assert.equal(result.statusCode, 400);
+  assert.equal(save.mock.callCount(), 0);
+  assert.equal(job.staffAssignments[0]?.hourRate, 22.5);
 });
 
 type JobRecordForTest = Pick<
